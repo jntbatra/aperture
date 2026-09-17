@@ -19,6 +19,8 @@ def db(tmp_path):
         INSERT INTO events VALUES
             (1, 1, 'a'), (2, 1, 'b'), (3, 1, 'c'),
             (4, 2, 'a'), (5, 2, 'b'), (6, 3, 'a');
+        CREATE TABLE riders (id INTEGER PRIMARY KEY, name TEXT);
+        INSERT INTO riders VALUES (1, 'r1');
         """
     )
     connection.commit()
@@ -35,6 +37,13 @@ def snapshot():
             ColumnInfo(name="id", data_type="INTEGER", is_pk=True),
             ColumnInfo(name="amount", data_type="INTEGER"),
             ColumnInfo(name="rider", data_type="TEXT"),
+        ],
+    )
+    snap.tables["riders"] = TableInfo(
+        name="riders",
+        columns=[
+            ColumnInfo(name="id", data_type="INTEGER", is_pk=True),
+            ColumnInfo(name="name", data_type="TEXT"),
         ],
     )
     snap.tables["events"] = TableInfo(
@@ -69,16 +78,31 @@ def test_no_finding_for_an_unjoined_aggregate(db, snapshot):
     assert verify(db, "SELECT SUM(amount) FROM orders", snapshot, dialect="sqlite") == []
 
 
-def test_null_grouping_keys_are_reported(db, snapshot):
+def test_null_keys_are_reported_as_a_bucket_not_as_loss(db, snapshot):
+    # A GROUP BY keeps NULL keys as their own group: nothing is dropped, but a
+    # large unlabelled bucket is easy to misread as a category.
     sql = "SELECT rider, count(*) FROM orders GROUP BY rider"
     findings = verify(db, sql, snapshot, dialect="sqlite")
-    assert [f.kind for f in findings] == ["dropped_groups"]
-    assert "2 of 3" in findings[0].message
+    assert [f.kind for f in findings] == ["null_group"]
+    assert "counted" in findings[0].message
 
 
 def test_group_by_without_nulls_is_silent(db, snapshot):
     sql = "SELECT amount, count(*) FROM orders GROUP BY amount"
     assert verify(db, sql, snapshot, dialect="sqlite") == []
+
+
+def test_inner_join_discarding_rows_is_reported(db, snapshot):
+    # Only order 1 has a rider, so joining discards two of three orders.
+    sql = "SELECT o.id FROM orders o JOIN riders r ON r.name = o.rider"
+    findings = verify(db, sql, snapshot, dialect="sqlite")
+    assert [f.kind for f in findings] == ["join_excluded_rows"]
+    assert "67%" in findings[0].message
+
+
+def test_left_join_is_not_reported(db, snapshot):
+    sql = "SELECT o.id FROM orders o LEFT JOIN riders r ON r.name = o.rider"
+    assert [f.kind for f in verify(db, sql, snapshot, dialect="sqlite")] == []
 
 
 def test_unparseable_sql_yields_no_findings(db, snapshot):

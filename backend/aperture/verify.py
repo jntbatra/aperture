@@ -8,8 +8,9 @@ model for a second opinion:
 * **Join fan-out.** Joining a child table multiplies parent rows, so any SUM or
   AVG over parent columns is inflated. No error is raised; the number is simply
   wrong.
-* **Dropped groups.** A GROUP BY over a nullable column silently omits rows
-  whose key is NULL, so the parts no longer add up to the whole.
+* **Rows discarded by a join.** An inner join keeps only rows with a match, so
+  joining orders to riders quietly answers a question about a subset. The count
+  looks reasonable and nothing errors.
 
 Each check re-runs a cheap COUNT-shaped probe derived from the query's own AST
 and compares two numbers. Findings are reported, never used to rewrite the
@@ -124,8 +125,66 @@ def check_fan_out(
     )
 
 
-def check_group_coverage(db: Database, tree: exp.Expr) -> Finding | None:
-    """Do the groups account for every row, or did NULL keys drop some?"""
+def check_join_exclusion(db: Database, tree: exp.Expr) -> Finding | None:
+    """Did the joins quietly answer a question about a subset?
+
+    An inner join keeps only rows that match. Asking for orders by rider, on a
+    table where most orders have no rider yet, answers for the minority that do
+    -- no error, a plausible number, the wrong population.
+    """
+    joins = list(tree.find_all(exp.Join))
+    if not joins:
+        return None
+    # An explicit LEFT/RIGHT/FULL join keeps unmatched rows; nothing to warn about.
+    if all((join.side or "").upper() in {"LEFT", "RIGHT", "FULL"} for join in joins):
+        return None
+
+    with_joins = _strip_to_count(tree, "COUNT(*)")
+    if not with_joins:
+        return None
+
+    unjoined = tree.copy()
+    for key in ("group", "order", "limit", "offset", "having", "qualify", "distinct", "with"):
+        unjoined.set(key, None)
+    unjoined.set("joins", [])
+    unjoined.set("expressions", [sqlglot.parse_one("COUNT(*)")])
+    # The WHERE clause may reference a joined table; if so the probe cannot run
+    # and the check is skipped rather than guessed at.
+    unjoined.set("where", None)
+
+    try:
+        kept = db.scalar(with_joins)
+        available = db.scalar(unjoined.sql())
+    except Exception as err:
+        log.debug("join exclusion probe failed: %s", err)
+        return None
+
+    if not kept or not available or kept >= available:
+        return None
+
+    dropped = available - kept
+    share = dropped / available
+    if share < 0.1:
+        return None
+
+    base = _base_table(tree)
+    name = base[0] if base else "the base table"
+    return Finding(
+        kind="join_excluded_rows",
+        message=(
+            f"The join keeps only {kept:,} of {available:,} {name} rows, discarding "
+            f"{share:.0%} that have no match. The answer describes that subset, not all "
+            f"{name}. Use a LEFT JOIN to keep them."
+        ),
+    )
+
+
+def check_null_group(db: Database, tree: exp.Expr) -> Finding | None:
+    """Warn that a NULL bucket will appear, not that rows were lost.
+
+    A GROUP BY keeps NULL keys as their own group, so nothing is dropped -- but
+    a large unnamed bucket is easy to read as a category, especially in a chart.
+    """
     group = tree.args.get("group") if isinstance(tree, exp.Select) else None
     if not group:
         return None
@@ -148,20 +207,21 @@ def check_group_coverage(db: Database, tree: exp.Expr) -> Finding | None:
 
     try:
         total = db.scalar(total_sql)
-        dropped = db.scalar(probe.sql())
+        null_rows = db.scalar(probe.sql())
     except Exception as err:
-        log.debug("group coverage probe failed: %s", err)
+        log.debug("null group probe failed: %s", err)
         return None
 
-    if not total or not dropped:
+    if not total or not null_rows or null_rows / total < 0.2:
         return None
 
-    share = dropped / total
+    share = null_rows / total
     return Finding(
-        kind="dropped_groups",
+        kind="null_group",
         message=(
-            f"{dropped:,} of {total:,} rows ({share:.0%}) have a NULL grouping key and are "
-            "absent from these groups, so the breakdown does not sum to the overall total."
+            f"{null_rows:,} of {total:,} rows ({share:.0%}) have no value for the grouping "
+            "column and appear as a single unlabelled group. They are counted, but that "
+            "group is not a category."
         ),
     )
 
@@ -176,7 +236,8 @@ def verify(db: Database, sql: str, snapshot: SchemaSnapshot, *, dialect: str) ->
     findings = []
     for check in (
         lambda: check_fan_out(db, tree, snapshot),
-        lambda: check_group_coverage(db, tree),
+        lambda: check_join_exclusion(db, tree),
+        lambda: check_null_group(db, tree),
     ):
         try:
             finding = check()
