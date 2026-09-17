@@ -6,12 +6,15 @@ because state is serialised by the checkpointer on every step.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
 
 from ..budget import LEDGER, BudgetExceeded
+from ..cache import lookup as cache_lookup
+from ..cache import remember as cache_remember
 from ..charts import build_spec
 from ..config import settings
 from ..db import Database, SchemaBundle, load_schema
@@ -20,12 +23,14 @@ from ..extract import NoSQLFound, extract_sql
 from ..followups import suggest
 from ..guards.cost import estimate_cost
 from ..guards.validator import validate_sql
+from ..insights import find_insights
 from ..llm import build_llm, invoke_metered, stop_reason, usage_of
 from ..schema import SchemaLinker
 from ..semantic import SemanticLayer
 from ..sqlfix import repair_identifiers
 from ..telemetry import record_run
 from ..verify import verify as verify_query
+from ..vote import gather
 from .empty import diagnose_empty
 from .prompts import generate_prompt, narrate_prompt, repair_prompt
 from .state import AnalystState
@@ -114,6 +119,17 @@ class AnalystContext:
     @property
     def dialect(self) -> str:
         return self.db.sqlglot_dialect
+
+    @property
+    def schema_version(self) -> str:
+        """Changes when the schema does, so cached SQL is invalidated."""
+        shape = ";".join(
+            f"{name}:{len(table.columns)}"
+            for name, table in sorted(self.bundle.snapshot.tables.items())
+        )
+        import hashlib as _hashlib
+
+        return _hashlib.sha256(shape.encode()).hexdigest()[:12]
 
 
 def _over_deadline(state: AnalystState) -> bool:
@@ -260,6 +276,30 @@ def make_nodes(ctx: AnalystContext) -> dict:
             )
             label = "generate"
 
+        # First attempt with voting enabled: sample several candidates, run
+        # them, and let agreement between independently written queries decide.
+        # Repairs stay single-shot -- there the database has already said what
+        # is wrong, so sampling adds cost without adding information.
+        first_attempt = not state.get("last_error")
+        if first_attempt:
+            cached = cache_lookup(
+                state["question"], ctx.db.fingerprint, ctx.schema_version
+            )
+            if cached:
+                # The query is reused; the data is always read fresh.
+                return {
+                    "sql": cached.sql,
+                    "assumptions": cached.assumptions,
+                    "cache_hit": True,
+                    "last_error": "",
+                    "last_error_kind": "",
+                    "trace": _note(state, "generate_sql", cached=True, hits=cached.hits),
+                }
+        if first_attempt and cfg.candidates > 1:
+            voted = _vote_on_candidates(state, messages)
+            if voted is not None:
+                return voted
+
         llm = build_llm(temperature=temperature, max_tokens=max_tokens)
         try:
             response = invoke_metered(llm, messages, label=label)
@@ -309,6 +349,79 @@ def make_nodes(ctx: AnalystContext) -> dict:
         update.update(sql=sql, assumptions=assumptions or state.get("assumptions", ""))
         return update
 
+    def _draft(messages: list, temperature: float) -> str | None:
+        """One candidate query, or None if the model did not return SQL."""
+        try:
+            response = invoke_metered(
+                build_llm(temperature=temperature), messages, label="candidate"
+            )
+        except BudgetExceeded:
+            raise
+        except Exception as err:
+            log.debug("candidate generation failed: %s", err)
+            return None
+        text = response.content if isinstance(response.content, str) else str(response.content)
+        if stop_reason(response) == "max_tokens":
+            return None
+        try:
+            return extract_sql(text, dialect=ctx.dialect)
+        except NoSQLFound:
+            return None
+
+    def _vote_on_candidates(state: AnalystState, messages: list) -> AnalystState | None:
+        """Sample candidates and pick the result most of them agree on.
+
+        Returns None when voting produced nothing runnable, so the caller falls
+        back to a single generation and the ordinary repair loop.
+        """
+        temperatures = [0.0] + [cfg.candidate_temperature] * (cfg.candidates - 1)
+        try:
+            vote = gather(
+                lambda temperature: _draft(messages, temperature),
+                temperatures,
+                db=ctx.db,
+                snapshot=ctx.bundle.snapshot,
+                dialect=ctx.dialect,
+                row_limit=cfg.row_limit,
+            )
+        except BudgetExceeded as err:
+            return {
+                "status": "over_budget",
+                "answer": f"Stopped: {err}",
+                "trace": _note(state, "generate_sql", error="budget"),
+            }
+
+        if not vote.winner:
+            failed = next((c for c in vote.candidates if c.error), None)
+            if not failed:
+                return None
+            # Every candidate failed the same way; hand the error to the loop.
+            return {
+                "sql": failed.sql,
+                "last_error": failed.error,
+                "last_error_kind": failed.error_kind,
+                "trace": _note(state, "generate_sql", candidates=vote.considered, runnable=0),
+            }
+
+        winner = vote.winner
+        return {
+            "sql": winner.sql,
+            "columns": winner.columns,
+            "rows": winner.rows,
+            "row_count": winner.row_count,
+            "vote_agreement": vote.agreement,
+            "vote_considered": vote.considered,
+            "last_error": "",
+            "last_error_kind": "",
+            "trace": _note(
+                state,
+                "generate_sql",
+                candidates=vote.considered,
+                runnable=vote.executable,
+                agreement=vote.agreement,
+            ),
+        }
+
     def validate(state: AnalystState) -> AnalystState:
         sql = state.get("sql", "")
         if not sql:
@@ -318,6 +431,29 @@ def make_nodes(ctx: AnalystContext) -> dict:
         trace = _note(state, "validate", ok=result.ok, kind=result.kind)
 
         if result.ok:
+            # A table the schema does not contain cannot be fixed by executing
+            # it and reading the error; check membership here and name the real
+            # tables, which is what the model needed in the first place.
+            known = set(ctx.bundle.snapshot.tables)
+            unknown = [t for t in result.tables if t not in known]
+            if unknown:
+                suggestions = []
+                for name in unknown:
+                    close = difflib.get_close_matches(name, known, n=3, cutoff=0.5)
+                    if close:
+                        suggestions.append(f"{name} (did you mean: {', '.join(close)}?)")
+                    else:
+                        suggestions.append(name)
+                return {
+                    "last_error": (
+                        "These tables do not exist in this database: "
+                        + "; ".join(suggestions)
+                    ),
+                    "last_error_kind": "42P01",
+                    "repair_note": "",
+                    "trace": _note(state, "validate", ok=False, kind="unknown_table"),
+                }
+
             # Correct case-folded identifiers before the database rejects them.
             # The schema already knows the real spelling, so spending a repair
             # attempt to rediscover it is waste.
@@ -554,13 +690,32 @@ def make_nodes(ctx: AnalystContext) -> dict:
             "trace": _note(state, "narrate", rows=row_count),
         }
 
+    def _remember_query(state: AnalystState) -> None:
+        if state.get("cache_hit") or not state.get("sql"):
+            return
+        cache_remember(
+            state.get("question", ""),
+            ctx.db.fingerprint,
+            ctx.schema_version,
+            state["sql"],
+            state.get("assumptions", ""),
+        )
+
     def verify_result(state: AnalystState) -> AnalystState:
+        _remember_query(state)
         findings = verify_query(
             ctx.db, state.get("sql", ""), ctx.bundle.snapshot, dialect=ctx.dialect
         )
+        patterns = find_insights(state.get("columns") or [], state.get("rows") or [])
         return {
             "verification": [{"kind": f.kind, "message": f.message} for f in findings],
-            "trace": _note(state, "verify", findings=[f.kind for f in findings]),
+            "insights": [{"kind": i.kind, "message": i.message} for i in patterns],
+            "trace": _note(
+                state,
+                "verify",
+                findings=[f.kind for f in findings],
+                insights=[i.kind for i in patterns],
+            ),
         }
 
     def chart(state: AnalystState) -> AnalystState:

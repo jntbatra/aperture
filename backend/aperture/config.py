@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # Used when a repair attempt returns byte-identical SQL: same prompt at
     # temperature 0 gives the same tokens, so something has to change.
     repair_temperature: float = 0.3
+    # Self-consistency: how many candidate queries to sample for a first
+    # attempt. 1 disables voting. Each candidate costs one generation call.
+    candidates: int = 3
+    candidate_temperature: float = 0.6
     bedrock_max_retries: int = 8
     bedrock_read_timeout: int = 120
 
@@ -43,6 +47,11 @@ class Settings(BaseSettings):
     # token ceiling for one question, so a pathological retry loop cannot eat
     # a meaningful slice of the global budget
     max_question_tokens: int = 40_000
+
+    # question cache: stores the chosen SQL, never the rows, so repeated
+    # questions skip generation but still read current data
+    cache_enabled: bool = True
+    cache_ttl_seconds: int = 7 * 24 * 3600
 
     # budget ledger, USD
     budget_ceiling_usd: float = 10.0

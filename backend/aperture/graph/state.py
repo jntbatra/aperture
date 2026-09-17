@@ -52,6 +52,10 @@ class AnalystState(TypedDict, total=False):
     repair_note: str
     # Identifiers rewritten deterministically from the schema, e.g. createdat -> "createdAt"
     identifier_fixes: list[str]
+    # Self-consistency: how many candidates agreed with the chosen result
+    vote_agreement: int
+    vote_considered: int
+    cache_hit: bool
 
     # execution
     columns: list[str]
@@ -66,6 +70,7 @@ class AnalystState(TypedDict, total=False):
     assumptions: str
     # Deterministic post-execution checks: fan-out, dropped groups
     verification: list[dict]
+    insights: list[dict]
     suggestions: list[dict]
     answer: str
     chart_spec: dict | None

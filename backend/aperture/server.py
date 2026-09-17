@@ -286,6 +286,7 @@ async def ask(body: AskRequest, user: User = Depends(current_user)):
             "chart_spec": final.get("chart_spec"),
             "assumptions": final.get("assumptions"),
             "verification": final.get("verification", []),
+            "insights": final.get("insights", []),
             "suggestions": final.get("suggestions", []),
             "status": final.get("status"),
             "attempts": final.get("attempts", 0),
@@ -343,7 +344,9 @@ async def drop_connection(name: str, user: User = Depends(current_user)):
 async def upload(file: UploadFile = File(...), user: User = Depends(current_user)):
     """Accept a CSV, Excel workbook or SQLite file and register it."""
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".csv", ".tsv", ".xlsx", ".xlsm", ".db", ".sqlite", ".sqlite3"}:
+    if suffix not in {
+        ".csv", ".tsv", ".xlsx", ".xlsm", ".db", ".sqlite", ".sqlite3", ".sql", ".dump",
+    }:
         raise HTTPException(400, f"unsupported file type: {suffix or 'none'}")
 
     name = safe_identifier(Path(file.filename or "dataset").stem, fallback="dataset")
@@ -365,9 +368,11 @@ async def upload(file: UploadFile = File(...), user: User = Depends(current_user
     finally:
         staged_path.unlink(missing_ok=True)
 
-    kind = "sqlite" if suffix in {".db", ".sqlite", ".sqlite3"} else (
-        "excel" if suffix in {".xlsx", ".xlsm"} else "csv"
-    )
+    kind = {
+        ".db": "sqlite", ".sqlite": "sqlite", ".sqlite3": "sqlite",
+        ".xlsx": "excel", ".xlsm": "excel",
+        ".sql": "dump", ".dump": "dump",
+    }.get(suffix, "csv")
     register_upload(user, result, name=name, source=file.filename or name, kind=kind)
     forget_analyst(result.database_url)
 

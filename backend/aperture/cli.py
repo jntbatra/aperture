@@ -150,6 +150,9 @@ def ask(
     status = final.get("status", "unknown")
     console.print(Panel(final.get("answer", "(no answer)"), title=status, border_style=STATUS_STYLES.get(status, "white")))
 
+    for insight in final.get("insights", []):
+        console.print(f"[cyan]note[/cyan]: {insight['message']}")
+
     for finding in final.get("verification", []):
         console.print(f"[yellow]caveat[/yellow]: {finding['message']}")
 

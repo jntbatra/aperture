@@ -400,4 +400,8 @@ def load_any(source: str | Path, *, dataset: str | None = None) -> IngestResult:
         return load_excel(source, dataset=dataset)
     if suffix in {".db", ".sqlite", ".sqlite3"}:
         return adopt_sqlite(source, dataset=dataset)
+    if suffix in {".sql", ".dump"}:
+        from .dumps import load_sql_dump
+
+        return load_sql_dump(source, dataset=dataset)
     return load_csv(source, dataset=dataset)

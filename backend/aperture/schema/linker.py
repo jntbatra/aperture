@@ -62,9 +62,17 @@ class LinkedSchema:
     value_hints: list[str] = field(default_factory=list)
     empty_tables: list[str] = field(default_factory=list)
     seeds: list[str] = field(default_factory=list)
+    # Names of every table, so an unlisted one is visibly not an option.
+    inventory: list[str] = field(default_factory=list)
 
     def as_prompt_section(self) -> str:
-        parts = [f"SCHEMA\n{self.ddl}"]
+        parts = []
+        if self.inventory:
+            parts.append(
+                "EVERY TABLE IN THIS DATABASE (use only these names)\n  "
+                + ", ".join(self.inventory)
+            )
+        parts.append(f"SCHEMA OF THE RELEVANT TABLES\n{self.ddl}")
         if self.join_hints:
             parts.append("JOINS\n" + "\n".join(f"  {h}" for h in self.join_hints))
         if self.value_hints:
@@ -184,6 +192,7 @@ class SchemaLinker:
         empty = [t for t in tables if t in self.profile.tables and self.profile.tables[t].is_empty]
 
         return LinkedSchema(
+            inventory=sorted(self.snapshot.tables),
             tables=tables,
             ddl=self.snapshot.ddl_for(tables, profile=self.profile),
             join_hints=self.graph.join_hints(tables),

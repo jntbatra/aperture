@@ -85,6 +85,7 @@ class ValidationResult:
     limit_injected: bool = False
     tables: list[str] = field(default_factory=list)
     columns: list[str] = field(default_factory=list)
+    ctes: list[str] = field(default_factory=list)
     dialect: str = ""
 
     @property
@@ -99,6 +100,11 @@ class ValidationResult:
     @property
     def reason(self) -> str:
         return "; ".join(self.reasons)
+
+
+def _cte_names(tree: exp.Expr) -> set[str]:
+    """Names defined by WITH clauses, which are not real tables."""
+    return {cte.alias_or_name for cte in tree.find_all(exp.CTE) if cte.alias_or_name}
 
 
 def _referenced(tree: exp.Expr) -> tuple[list[str], list[str]]:
@@ -150,7 +156,14 @@ def validate_sql(sql: str, *, dialect: str, row_limit: int = 1000) -> Validation
 
     tree = statements[0]
     tables, columns = _referenced(tree)
-    base = {"original_sql": sql, "tables": tables, "columns": columns, "dialect": dialect}
+    ctes = sorted(_cte_names(tree))
+    base = {
+        "original_sql": sql,
+        "tables": [t for t in tables if t not in ctes],
+        "columns": columns,
+        "ctes": ctes,
+        "dialect": dialect,
+    }
 
     write_hits = list(tree.find_all(*WRITE_NODES))
     if write_hits:
