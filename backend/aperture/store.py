@@ -122,21 +122,39 @@ def ensure_local_user() -> User:
     )
 
 
+def _write_user(connection: sqlite3.Connection, user: User, email: str | None) -> None:
+    connection.execute(
+        """
+        INSERT INTO users (id, email, name, picture, provider, created_at)
+        VALUES (?,?,?,?,?,?)
+        ON CONFLICT (id) DO UPDATE SET
+            email = excluded.email,
+            name = excluded.name,
+            picture = excluded.picture,
+            provider = excluded.provider
+        """,
+        (user.id, email, user.name, user.picture, user.provider, time.time()),
+    )
+
+
 def upsert_user(user: User) -> User:
+    """Insert or update a user.
+
+    `email` is UNIQUE, and SQLite treats NULLs as distinct but empty strings as
+    equal -- so an account without an address is stored as NULL. Two users with
+    no email is normal (the local profile has none, and a service caller may not
+    send one); two users colliding on it is not. A genuine duplicate address
+    falls back to NULL as well: identity here is the id, and an email that
+    cannot be stored is not worth failing a request over.
+    """
     connection = connect()
-    with connection:
-        connection.execute(
-            """
-            INSERT INTO users (id, email, name, picture, provider, created_at)
-            VALUES (?,?,?,?,?,?)
-            ON CONFLICT (id) DO UPDATE SET
-                email = excluded.email,
-                name = excluded.name,
-                picture = excluded.picture,
-                provider = excluded.provider
-            """,
-            (user.id, user.email, user.name, user.picture, user.provider, time.time()),
-        )
+    email = user.email or None
+    try:
+        with connection:
+            _write_user(connection, user, email)
+    except sqlite3.IntegrityError:
+        with connection:
+            _write_user(connection, user, None)
     connection.close()
     return user
 

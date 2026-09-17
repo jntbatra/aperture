@@ -174,6 +174,35 @@ Everything is `APERTURE_`-prefixed environment or `.env`. The ones that matter:
 
 There is deliberately **no write credential**: write statements are refused, not escalated.
 
+## Hosted mode
+
+Aperture signed out is a local tool: a missing credential falls back to the
+local profile so every feature works without a Google project. Behind another
+application that fallback is the hole, so hosted mode closes it.
+
+```bash
+APERTURE_HOSTED=true \
+APERTURE_SERVICE_TOKEN="$(openssl rand -hex 32)" \
+APERTURE_REQUIRE_READ_ONLY=true \
+APERTURE_DATABASE_URL="postgresql+psycopg://aperture_ro:...@host/db" \
+uvicorn aperture.server:app --host 127.0.0.1 --port 8000
+```
+
+| | Local | Hosted |
+|---|---|---|
+| No credentials | local profile, everything works | `401` |
+| Service token | ignored | required as `X-Aperture-Token`, compared in constant time |
+| Identity | Google sign-in, or local | `X-Aperture-User` from the calling service, which already authenticated the human |
+| `POST /connections`, `POST /upload` | available | `403` — a hosted deployment gets its database from configuration, never from a caller |
+| Writable role | allowed, guards still refuse writes | refuses to start |
+
+`APERTURE_REQUIRE_READ_ONLY` asks the database server what the connected role is
+allowed to do — `has_table_privilege` per table on Postgres, catalogue grants on
+MySQL, the URI mode on SQLite — and refuses to serve a connection that can
+write. `GET /readonly` reports the same answer at any time, so the claim is
+checkable from outside rather than promised in a README. A superuser is refused
+too: privilege checks say nothing about a role that bypasses them.
+
 ## Semantic layer
 
 `backend/aperture/semantic/semantic.yaml` holds the definitions a schema cannot supply — what counts

@@ -167,6 +167,86 @@ class QueryResult:
 
 
 @dataclass
+class ReadOnlyReport:
+    """Whether the connected role can write, and the evidence for the answer.
+
+    `SET TRANSACTION READ ONLY` already wraps every statement Aperture runs,
+    and the AST validator rejects writes before that. Both live inside this
+    process, so both are only as trustworthy as this process. A role that
+    holds no write privilege is the one guarantee that survives a bug here --
+    hosted mode refuses to serve a connection without it, so the promise is
+    checked rather than documented.
+    """
+
+    read_only: bool
+    role: str = ""
+    dialect: str = ""
+    default_transaction_read_only: bool = False
+    writable_tables: list[str] = field(default_factory=list)
+    reason: str = ""
+
+    def summary(self) -> str:
+        if self.read_only:
+            return f"role {self.role!r} holds no write privilege"
+        if self.writable_tables:
+            shown = ", ".join(self.writable_tables[:5])
+            more = f" (+{len(self.writable_tables) - 5} more)" if len(self.writable_tables) > 5 else ""
+            return f"role {self.role!r} can write to: {shown}{more}"
+        return self.reason or "could not establish that the connection is read-only"
+
+
+# Privileges that let a role change data. TRUNCATE is included because it is
+# not a DELETE and would otherwise pass a check that only looked for one.
+WRITE_PRIVILEGES = ("INSERT", "UPDATE", "DELETE", "TRUNCATE")
+
+# Tables the role can write to, named so a human can act on the answer.
+_PG_WRITABLE_TABLES = """
+SELECT c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r', 'p')
+  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  AND (
+    has_table_privilege(c.oid, 'INSERT')
+    OR has_table_privilege(c.oid, 'UPDATE')
+    OR has_table_privilege(c.oid, 'DELETE')
+    OR has_table_privilege(c.oid, 'TRUNCATE')
+  )
+ORDER BY c.relname
+"""
+
+_MYSQL_WRITE_GRANTS = """
+SELECT DISTINCT privilege_type FROM (
+    SELECT privilege_type FROM information_schema.user_privileges
+     WHERE grantee LIKE CONCAT("'", SUBSTRING_INDEX(CURRENT_USER(), '@', 1), "'@%")
+    UNION ALL
+    SELECT privilege_type FROM information_schema.schema_privileges
+     WHERE grantee LIKE CONCAT("'", SUBSTRING_INDEX(CURRENT_USER(), '@', 1), "'@%")
+    UNION ALL
+    SELECT privilege_type FROM information_schema.table_privileges
+     WHERE grantee LIKE CONCAT("'", SUBSTRING_INDEX(CURRENT_USER(), '@', 1), "'@%")
+) g
+WHERE privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER')
+"""
+
+
+def _explain(err: Exception) -> str:
+    """A one-line reason a privilege check failed.
+
+    A connection error carries an empty `diag`, so the structured fields are
+    blank and only `str(err)` says anything -- and "could not read privileges:"
+    with nothing after it is the least useful message there is.
+    """
+    described = describe_error(err)
+    message = described.primary or described.raw or str(err)
+    return " ".join(message.split())[:200]
+
+
+class NotReadOnly(Exception):
+    """A connection was rejected because its role can write."""
+
+
+@dataclass
 class Database:
     url: str
     engine: Engine = field(init=False, repr=False)
@@ -239,6 +319,97 @@ class Database:
         with self.engine.connect() as conn:
             self._apply_session_guards(conn)
             return conn.execute(text(sql)).scalar()
+
+    def read_only_report(self) -> ReadOnlyReport:
+        """Ask the server what this role is allowed to do.
+
+        Asking the catalogue is the only honest way to answer: a probe that
+        tried an INSERT to see whether it failed would be a write attempt
+        against production, which is the thing being prevented.
+        """
+        if self.dialect == "postgresql":
+            return self._pg_read_only_report()
+        if self.dialect == "sqlite":
+            return self._sqlite_read_only_report()
+        return self._mysql_read_only_report()
+
+    def _pg_read_only_report(self) -> ReadOnlyReport:
+        try:
+            with self.engine.connect() as conn:
+                role = conn.execute(text("SELECT current_user")).scalar() or ""
+                superuser = bool(
+                    conn.execute(
+                        text("SELECT usesuper FROM pg_user WHERE usename = current_user")
+                    ).scalar()
+                )
+                default_ro = (
+                    conn.execute(
+                        text("SELECT current_setting('default_transaction_read_only')")
+                    ).scalar()
+                    == "on"
+                )
+                writable = [row[0] for row in conn.execute(text(_PG_WRITABLE_TABLES))]
+        except SQLAlchemyError as err:
+            return ReadOnlyReport(
+                read_only=False,
+                dialect=self.dialect,
+                reason=f"could not read privileges: {_explain(err)}",
+            )
+
+        if superuser:
+            return ReadOnlyReport(
+                read_only=False,
+                role=role,
+                dialect=self.dialect,
+                default_transaction_read_only=default_ro,
+                reason=f"role {role!r} is a superuser, so privilege checks do not constrain it",
+            )
+        return ReadOnlyReport(
+            read_only=not writable,
+            role=role,
+            dialect=self.dialect,
+            default_transaction_read_only=default_ro,
+            writable_tables=writable,
+        )
+
+    def _sqlite_read_only_report(self) -> ReadOnlyReport:
+        """SQLite has no roles, so read-only is a property of the file or URI."""
+        url = make_url(self.url)
+        database = url.database or ""
+        uri_read_only = "mode=ro" in database or url.query.get("mode") == "ro"
+        if uri_read_only:
+            return ReadOnlyReport(read_only=True, role="sqlite", dialect=self.dialect)
+        return ReadOnlyReport(
+            read_only=False,
+            role="sqlite",
+            dialect=self.dialect,
+            reason="SQLite has no roles; open the file with ?mode=ro to make it read-only",
+        )
+
+    def _mysql_read_only_report(self) -> ReadOnlyReport:
+        try:
+            with self.engine.connect() as conn:
+                role = conn.execute(text("SELECT CURRENT_USER()")).scalar() or ""
+                grants = [row[0] for row in conn.execute(text(_MYSQL_WRITE_GRANTS))]
+        except SQLAlchemyError as err:
+            return ReadOnlyReport(
+                read_only=False,
+                dialect=self.dialect,
+                reason=f"could not read privileges: {_explain(err)}",
+            )
+        return ReadOnlyReport(
+            read_only=not grants,
+            role=role,
+            dialect=self.dialect,
+            reason="" if not grants else f"role holds {', '.join(sorted(grants))}",
+        )
+
+    def assert_read_only(self) -> ReadOnlyReport:
+        """Raise `NotReadOnly` unless the connected role holds no write privilege."""
+        report = self.read_only_report()
+        if not report.read_only:
+            raise NotReadOnly(report.summary())
+        return report
 
     def dispose(self) -> None:
         self.engine.dispose()

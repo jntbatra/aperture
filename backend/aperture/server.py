@@ -36,7 +36,7 @@ from .api_deps import (
 from .budget import LEDGER
 from .charts import jsonable
 from .config import settings
-from .db import Database
+from .db import Database, NotReadOnly
 from .ingest import load_any, safe_identifier
 from .store import (
     User,
@@ -55,9 +55,30 @@ log = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 
+def allowed_origins() -> list[str]:
+    return [origin.strip() for origin in settings().allowed_origins.split(",") if origin.strip()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     local_user()
+    config = settings()
+    if config.hosted:
+        # Refusing to start is the right failure: a hosted process that came up
+        # without its token would serve production data to anyone who could
+        # reach the port, and nothing downstream would notice.
+        if not config.service_token:
+            raise RuntimeError(
+                "hosted mode requires APERTURE_SERVICE_TOKEN; refusing to start"
+            )
+        log.info("aperture hosted: writes refused, uploads and connection changes disabled")
+    if config.require_read_only:
+        report = Database(config.database_url).read_only_report()
+        if not report.read_only:
+            raise RuntimeError(
+                f"APERTURE_REQUIRE_READ_ONLY is set but {report.summary()}; refusing to start"
+            )
+        log.info("read-only verified at startup: %s", report.summary())
     log.info("aperture ready")
     yield
 
@@ -65,21 +86,52 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Aperture", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=allowed_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-async def current_user(authorization: str | None = Header(default=None)) -> User:
+async def current_user(
+    authorization: str | None = Header(default=None),
+    x_aperture_token: str | None = Header(default=None),
+    x_aperture_user: str | None = Header(default=None),
+    x_aperture_email: str | None = Header(default=None),
+    x_aperture_name: str | None = Header(default=None),
+) -> User:
     """The requesting user.
 
-    Authentication is optional: with no credentials the local profile is used,
-    so every feature works signed out.
+    Local mode: authentication is optional and a missing credential falls back
+    to the local profile, so every feature works signed out.
+
+    Hosted mode: that fallback is exactly the hole to close, so the service
+    token is required and a bad one is a 401. The human's identity comes from
+    the calling service, which has already authenticated them.
     """
-    from .auth import user_from_header
+    from .auth import ServiceAuthError, check_service_token, service_user, user_from_header
+
+    if settings().hosted:
+        try:
+            check_service_token(x_aperture_token)
+        except ServiceAuthError as err:
+            log.warning("hosted request rejected: %s", err)
+            raise HTTPException(401, "not authorised") from err
+        return service_user(
+            x_aperture_user or "", email=x_aperture_email or "", name=x_aperture_name or ""
+        )
 
     return user_from_header(authorization)
+
+
+def refuse_when_hosted(what: str) -> None:
+    """Endpoints that change what Aperture is pointed at.
+
+    Hosted, the database is configuration and a caller has no business
+    replacing it: a registered connection URL is a credential, and an uploaded
+    file is arbitrary content written to the server's disk.
+    """
+    if settings().hosted:
+        raise HTTPException(403, f"{what} is disabled on this server")
 
 
 class GoogleCredential(BaseModel):
@@ -239,7 +291,13 @@ async def ask(body: AskRequest, user: User = Depends(current_user)):
     if not chosen:
         raise HTTPException(400, "no connection available; load a file or add a database")
 
-    graph, ctx = analyst_for(chosen["url"])
+    try:
+        graph, ctx = analyst_for(chosen["url"])
+    except NotReadOnly as err:
+        # Configuration is wrong, not the question. Say so plainly instead of
+        # falling through to a graph that would query a writable role.
+        log.error("refusing connection %r: %s", chosen["name"], err)
+        raise HTTPException(503, f"this database is not connected read-only: {err}") from err
 
     # A follow-up amends the previous query, so prior turns travel with it.
     history = []
@@ -322,6 +380,7 @@ async def connections(user: User = Depends(current_user)):
 
 @app.post("/connections")
 async def add_connection(body: NewConnection, user: User = Depends(current_user)):
+    refuse_when_hosted("adding a connection")
     try:
         database = Database(body.url)
         database.scalar("SELECT 1")
@@ -334,6 +393,7 @@ async def add_connection(body: NewConnection, user: User = Depends(current_user)
 
 @app.delete("/connections/{name}")
 async def drop_connection(name: str, user: User = Depends(current_user)):
+    refuse_when_hosted("removing a connection")
     connection = find_connection(user, name)
     if connection:
         forget_analyst(connection["url"])
@@ -345,6 +405,7 @@ async def drop_connection(name: str, user: User = Depends(current_user)):
 @app.post("/upload")
 async def upload(file: UploadFile = File(...), user: User = Depends(current_user)):
     """Accept a CSV, Excel workbook or SQLite file and register it."""
+    refuse_when_hosted("uploading a file")
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in {
         ".csv", ".tsv", ".xlsx", ".xlsm", ".db", ".sqlite", ".sqlite3", ".sql", ".dump",
@@ -396,7 +457,10 @@ async def schema(connection: str = "", user: User = Depends(current_user)):
     chosen = find_connection(user, connection) if connection else default_connection(user)
     if not chosen:
         raise HTTPException(400, "no connection available")
-    _, ctx = analyst_for(chosen["url"])
+    try:
+        _, ctx = analyst_for(chosen["url"])
+    except NotReadOnly as err:
+        raise HTTPException(503, f"this database is not connected read-only: {err}") from err
     return {
         "connection": chosen["name"],
         "dialect": ctx.db.dialect,
@@ -416,7 +480,7 @@ async def schema(connection: str = "", user: User = Depends(current_user)):
 
 
 @app.get("/usage")
-async def usage():
+async def usage(user: User = Depends(current_user)):
     cfg = settings()
     return {
         "calls": LEDGER.total.calls,
@@ -430,7 +494,26 @@ async def usage():
 
 @app.get("/health")
 async def health():
-    return {"ok": True}
+    """Liveness only -- deliberately unauthenticated, and says nothing about the data."""
+    return {"ok": True, "hosted": settings().hosted}
+
+
+@app.get("/readonly")
+async def readonly(user: User = Depends(current_user)):
+    """What the connected role is actually allowed to do, checked against the server."""
+    chosen = default_connection(user)
+    if not chosen:
+        raise HTTPException(400, "no connection available")
+    report = Database(chosen["url"]).read_only_report()
+    return {
+        "connection": chosen["name"],
+        "read_only": report.read_only,
+        "role": report.role,
+        "dialect": report.dialect,
+        "default_transaction_read_only": report.default_transaction_read_only,
+        "writable_tables": report.writable_tables,
+        "summary": report.summary(),
+    }
 
 
 def ui_directory() -> Path:

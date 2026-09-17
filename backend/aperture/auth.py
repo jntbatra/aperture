@@ -101,3 +101,47 @@ def user_from_header(authorization: str | None) -> User:
         if user:
             return user
     return ensure_local_user()
+
+
+# --- hosted mode -------------------------------------------------------------
+
+
+class ServiceAuthError(Exception):
+    """A hosted request carried no valid service token."""
+
+
+def service_token() -> str:
+    return settings().service_token
+
+
+def check_service_token(token: str | None) -> None:
+    """Validate the calling service's shared secret.
+
+    Compared with `secrets.compare_digest` so a wrong token takes the same time
+    as a right one, and rejected outright when no token is configured -- an
+    empty secret would match an empty header and open the service to anyone who
+    can reach the port.
+    """
+    configured = service_token()
+    if not configured:
+        raise ServiceAuthError("hosted mode is enabled but APERTURE_SERVICE_TOKEN is unset")
+    if not token or not secrets.compare_digest(token, configured):
+        raise ServiceAuthError("invalid service token")
+
+
+def service_user(caller_id: str, *, email: str = "", name: str = "") -> User:
+    """The identity a hosted request acts as.
+
+    The calling service has already authenticated the human; Aperture only
+    needs a stable id to key conversations by, so one operator's chat history
+    never appears in another's.
+    """
+    identifier = (caller_id or "").strip()[:128] or "unknown"
+    return upsert_user(
+        User(
+            id=f"service:{identifier}",
+            email=email[:200],
+            name=name[:200] or identifier,
+            provider="service",
+        )
+    )

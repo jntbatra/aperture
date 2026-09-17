@@ -94,6 +94,26 @@ class Settings(BaseSettings):
     # session signing key; generated into ~/.aperture/session.key when unset
     session_secret: str = ""
 
+    # --- hosted mode -------------------------------------------------------
+    # Off by default, so a local clone stays a local tool. On, Aperture treats
+    # itself as a service behind another application: every request must carry
+    # a service token, and the endpoints that register a connection or upload a
+    # file are removed rather than guarded -- a hosted deployment gets its
+    # database from configuration, never from a caller.
+    hosted: bool = False
+    # Shared secret the calling service must present as `X-Aperture-Token`.
+    # Hosted mode refuses to start without one: an empty token would compare
+    # equal to a missing header and silently open the service.
+    service_token: str = ""
+    # Comma-separated browser origins allowed to call the API directly. A
+    # hosted deployment is normally reached through its own backend, so the
+    # default stays local-only.
+    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # Refuse to serve a database whose role can write. The read-only role is
+    # the guardrail that does not depend on a prompt or a parser, so hosted
+    # mode verifies it rather than trusting that someone ran the GRANT.
+    require_read_only: bool = False
+
     # where Aperture keeps its own state: checkpoints, schema cache, ledger
     home_dir: str = "~/.aperture"
 

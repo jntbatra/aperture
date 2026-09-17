@@ -35,10 +35,20 @@ _LOCK = threading.Lock()
 
 
 def analyst_for(url: str):
-    """Compiled graph and context for a database URL, built once per process."""
+    """Compiled graph and context for a database URL, built once per process.
+
+    When `APERTURE_REQUIRE_READ_ONLY` is set, the role behind the URL is checked
+    before a graph is built, and a writable role is refused. The check happens
+    here rather than at startup so it covers every connection the process ever
+    serves, not just the one it was configured with.
+    """
     with _LOCK:
         if url not in _GRAPHS:
-            ctx = AnalystContext.create(Database(url))
+            database = Database(url)
+            if settings().require_read_only:
+                report = database.assert_read_only()
+                log.info("read-only verified: %s", report.summary())
+            ctx = AnalystContext.create(database)
             _GRAPHS[url] = build_analyst(ctx)
         return _GRAPHS[url]
 
