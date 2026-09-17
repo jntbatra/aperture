@@ -140,6 +140,13 @@ class Database:
     def from_settings(cls) -> Database:
         return cls(settings().database_url)
 
+    @classmethod
+    def active(cls) -> Database:
+        """The dataset selected by `aperture load`, else the configured database."""
+        from ..ingest import active_database_url
+
+        return cls(active_database_url())
+
     @property
     def sqlglot_dialect(self) -> str:
         """sqlglot spells Postgres differently from SQLAlchemy."""

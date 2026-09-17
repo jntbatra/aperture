@@ -20,6 +20,7 @@ from rich.table import Table
 from .budget import LEDGER
 from .config import settings
 from .db import Database, load_schema
+from .ingest import active_database_url, datasets_dir, forget_dataset, load_csv, remember_dataset
 from .graph import build_analyst, sync_checkpointer
 from .schema import SchemaLinker
 
@@ -142,12 +143,65 @@ def ask(
 
 
 @app.command()
+def load(
+    path: str = typer.Argument(..., help="CSV file to load."),
+    dataset: str | None = typer.Option(None, "--name", help="Dataset name (default: file stem)."),
+    table: str | None = typer.Option(None, "--table", help="Table name (default: file stem)."),
+    delimiter: str | None = typer.Option(None, "--delimiter", help="Override the CSV delimiter."),
+) -> None:
+    """Load a CSV and make it the active dataset.
+
+    No database required: the file becomes a real SQLite table with inferred
+    types, and every other command works against it unchanged.
+    """
+    result = load_csv(path, dataset=dataset, table=table, delimiter=delimiter)
+    remember_dataset(result.database_url)
+
+    table_view = Table(title=result.summary(), box=None)
+    table_view.add_column("column")
+    table_view.add_column("type")
+    table_view.add_column("from")
+    for column in result.columns:
+        renamed = "" if column.source == column.name else column.source
+        table_view.add_row(column.name, column.sql_type, renamed)
+    console.print(table_view)
+    console.print(f"\n[dim]stored at {result.path}[/dim]")
+    console.print('[dim]now ask: aperture ask "what were total units by region?"[/dim]')
+
+
+@app.command()
+def datasets(
+    reset: bool = typer.Option(False, "--reset", help="Go back to the configured database."),
+) -> None:
+    """List loaded CSV datasets and show which one is active."""
+    if reset:
+        forget_dataset()
+        console.print(f"[dim]active database: {settings().database_url}[/dim]")
+        return
+
+    active = active_database_url()
+    listing = Table(box=None)
+    listing.add_column("")
+    listing.add_column("dataset")
+    listing.add_column("size", justify="right")
+    found = sorted(datasets_dir().glob("*.db"))
+    for path in found:
+        marker = "[green]•[/green]" if str(path) in active else " "
+        listing.add_row(marker, path.stem, f"{path.stat().st_size / 1024:.0f} KB")
+    if found:
+        console.print(listing)
+    else:
+        console.print("[dim]no CSV datasets loaded yet — try: aperture load data.csv[/dim]")
+    console.print(f"\n[dim]active: {active}[/dim]")
+
+
+@app.command()
 def profile(
     refresh: bool = typer.Option(False, "--refresh", help="Re-read the schema."),
     table: str | None = typer.Option(None, "--table", help="Show one table in full."),
 ) -> None:
     """Show what Aperture knows about the database."""
-    db = Database.from_settings()
+    db = Database.active()
     bundle = load_schema(db, refresh=refresh)
 
     if table:
@@ -179,7 +233,7 @@ def profile(
 @app.command()
 def link(question: str = typer.Argument(..., help="Question to link against the schema.")) -> None:
     """Show which tables a question retrieves, and why."""
-    db = Database.from_settings()
+    db = Database.active()
     bundle = load_schema(db)
     linker = SchemaLinker(bundle.snapshot, bundle.profile)
     linked = linker.link(question)

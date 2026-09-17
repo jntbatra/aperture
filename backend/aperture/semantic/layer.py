@@ -53,6 +53,22 @@ class SemanticLayer:
     metrics: list[Metric] = field(default_factory=list)
     conventions: list[str] = field(default_factory=list)
 
+    def for_tables(self, available: set[str]) -> SemanticLayer:
+        """Restrict this layer to definitions the connected schema supports.
+
+        Definitions are written for one database. Applied to another they are
+        actively harmful: a rule saying money is stored in paise made a CSV of
+        dollar amounts get reported in rupees. A metric survives only if every
+        table it names exists, and the conventions travel with the metrics --
+        if none apply, neither do they.
+        """
+        kept = [
+            metric
+            for metric in self.metrics
+            if metric.tables and set(metric.tables) <= available
+        ]
+        return SemanticLayer(metrics=kept, conventions=self.conventions if kept else [])
+
     @classmethod
     def load(cls, path: str | Path) -> SemanticLayer:
         path = Path(path)

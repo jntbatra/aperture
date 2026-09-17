@@ -49,10 +49,11 @@ class AnalystContext:
 
     @classmethod
     def create(cls, db: Database | None = None, *, refresh: bool = False) -> AnalystContext:
-        db = db or Database.from_settings()
+        db = db or Database.active()
         bundle = load_schema(db, refresh=refresh)
         linker = SchemaLinker(bundle.snapshot, bundle.profile)
-        return cls(db=db, bundle=bundle, linker=linker)
+        semantic = SemanticLayer.default().for_tables(set(bundle.snapshot.tables))
+        return cls(db=db, bundle=bundle, linker=linker, semantic=semantic)
 
     @property
     def dialect(self) -> str:
