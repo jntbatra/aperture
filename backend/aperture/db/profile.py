@@ -12,15 +12,50 @@ keeps profiling viable on a warehouse. Other dialects fall back to sampling.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
+from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 
 from sqlalchemy import text
+
+from ..config import settings
 
 from .connection import Database
 from .introspect import SchemaSnapshot
 
 # Columns with more distinct values than this are not worth enumerating.
 MAX_ENUMERABLE_DISTINCT = 25
+
+
+@lru_cache(maxsize=1)
+def _pii_pattern() -> re.Pattern:
+    return re.compile(settings().pii_column_pattern, re.I)
+
+
+_UUIDISH = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.I)
+
+
+def is_opaque_identifier(column, values: list[str]) -> bool:
+    """Whether a column's values are identifiers, not vocabulary.
+
+    A foreign key holding ten UUIDs is enumerable but worthless in a prompt: it
+    costs context and teaches nothing, unlike a status column whose labels the
+    model genuinely cannot guess.
+    """
+    if getattr(column, "is_pk", False) or getattr(column, "is_fk", False):
+        return True
+    return any(_UUIDISH.match(str(v)) for v in values[:3])
+
+
+def is_sensitive(column: str) -> bool:
+    """Whether a column's observed values must never reach a prompt.
+
+    The profiler enumerates any low-cardinality column, which on small real
+    tables means customer emails and phone numbers -- and those would then flow
+    into the prompt, to the model provider, and into any trace backend. Shape
+    (null rate, distinct count) is still recorded; only the values are dropped.
+    """
+    return bool(_pii_pattern().search(column))
 # Types whose min/max is worth knowing ("last month" is meaningless otherwise).
 RANGE_TYPES = ("timestamp", "date", "time")
 
@@ -34,9 +69,12 @@ class ColumnProfile:
     common_values: list[str] = field(default_factory=list)
     min_value: str | None = None
     max_value: str | None = None
+    sensitive: bool = False
 
     def describe(self) -> str:
         bits = []
+        if self.sensitive:
+            bits.append("values withheld (sensitive column)")
         if self.common_values:
             bits.append("values: " + ", ".join(self.common_values[:12]))
         if self.min_value is not None:
@@ -60,6 +98,27 @@ class TableProfile:
 @dataclass
 class DatabaseProfile:
     tables: dict[str, TableProfile] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "tables": {
+                name: {
+                    "table": t.table,
+                    "exact_rows": t.exact_rows,
+                    "columns": {c: asdict(p) for c, p in t.columns.items()},
+                }
+                for name, t in self.tables.items()
+            }
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DatabaseProfile":
+        profile = cls()
+        for name, t in data["tables"].items():
+            tp = TableProfile(table=t["table"], exact_rows=t["exact_rows"])
+            tp.columns = {c: ColumnProfile(**p) for c, p in t["columns"].items()}
+            profile.tables[name] = tp
+        return profile
 
     @property
     def empty_tables(self) -> list[str]:
@@ -158,14 +217,18 @@ def profile_database(
                     low, high = ranges.get(column.name, (None, None))
                     if not common and not low and not stat:
                         continue
+                    sensitive = is_sensitive(column.name)
+                    if common and is_opaque_identifier(column, common):
+                        common = []
                     tp.columns[column.name] = ColumnProfile(
                         table=table.name,
                         column=column.name,
                         null_fraction=stat.get("null_frac", 0.0),
                         distinct_estimate=n_distinct,
-                        common_values=common,
+                        common_values=[] if sensitive else common,
                         min_value=low,
                         max_value=high,
+                        sensitive=sensitive,
                     )
                 profile.tables[table.name] = tp
         return profile
@@ -189,7 +252,15 @@ def profile_database(
                         or 0
                     )
                     if 0 < distinct <= MAX_ENUMERABLE_DISTINCT:
-                        values = [
+                        if is_sensitive(column.name):
+                            tp.columns[column.name] = ColumnProfile(
+                                table=table.name,
+                                column=column.name,
+                                distinct_estimate=distinct,
+                                sensitive=True,
+                            )
+                            continue
+                        raw_values = [
                             str(r[0])
                             for r in conn.execute(
                                 text(
@@ -198,6 +269,7 @@ def profile_database(
                                 )
                             )
                         ]
+                        values = [] if is_opaque_identifier(column, raw_values) else raw_values
                         tp.columns[column.name] = ColumnProfile(
                             table=table.name,
                             column=column.name,

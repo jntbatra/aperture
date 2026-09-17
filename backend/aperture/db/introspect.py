@@ -8,7 +8,8 @@ in table count.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from typing import Callable
 
 from sqlalchemy import text
 
@@ -53,15 +54,25 @@ class TableInfo:
     def column(self, name: str) -> ColumnInfo | None:
         return next((c for c in self.columns if c.name == name), None)
 
-    def ddl(self) -> str:
-        """Compact CREATE-TABLE-ish rendering used in prompts."""
+    def ddl(self, annotate: "Callable[[str, str], str] | None" = None, *, rows: int | None = None) -> str:
+        """Compact CREATE-TABLE-ish rendering used in prompts.
+
+        `annotate(table, column)` supplies observed values and ranges from a
+        profile, so schema and data render together rather than in two passes.
+        """
         head = f"TABLE {self.name}"
         if self.comment:
             head += f"  -- {self.comment}"
-        if self.approx_rows:
-            head += f"  [~{self.approx_rows:,} rows]"
-        body = "\n".join(f"  {c.describe()}" for c in self.columns)
-        return f"{head}\n{body}"
+        count = rows if rows is not None else self.approx_rows
+        if count:
+            head += f"  [{count:,} rows]"
+        elif count == 0 and rows is not None:
+            head += "  [EMPTY]"
+        lines = []
+        for column in self.columns:
+            note = annotate(self.name, column.name) if annotate else ""
+            lines.append(f"  {column.describe()}" + (f"   -- {note}" if note else ""))
+        return f"{head}\n" + "\n".join(lines)
 
 
 @dataclass
@@ -83,8 +94,49 @@ class SchemaSnapshot:
     def table_names(self) -> list[str]:
         return sorted(self.tables)
 
-    def ddl_for(self, names: list[str]) -> str:
-        return "\n\n".join(self.tables[n].ddl() for n in names if n in self.tables)
+    def ddl_for(self, names: list[str], *, profile=None) -> str:
+        """Render DDL for `names`, interleaving profile annotations if given."""
+        annotate = profile.annotate if profile is not None else None
+        blocks = []
+        for name in names:
+            table = self.tables.get(name)
+            if table is None:
+                continue
+            rows = None
+            if profile is not None and name in profile.tables:
+                rows = profile.tables[name].exact_rows
+            blocks.append(table.ddl(annotate, rows=rows))
+        return "\n\n".join(blocks)
+
+    def to_dict(self) -> dict:
+        return {
+            "dialect": self.dialect,
+            "tables": {
+                name: {
+                    "name": t.name,
+                    "schema": t.schema,
+                    "comment": t.comment,
+                    "approx_rows": t.approx_rows,
+                    "columns": [asdict(c) for c in t.columns],
+                }
+                for name, t in self.tables.items()
+            },
+            "foreign_keys": [asdict(fk) for fk in self.foreign_keys],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SchemaSnapshot":
+        snap = cls(dialect=data["dialect"])
+        for name, t in data["tables"].items():
+            snap.tables[name] = TableInfo(
+                name=t["name"],
+                schema=t["schema"],
+                comment=t["comment"],
+                approx_rows=t["approx_rows"],
+                columns=[ColumnInfo(**c) for c in t["columns"]],
+            )
+        snap.foreign_keys = [ForeignKey(**fk) for fk in data["foreign_keys"]]
+        return snap
 
 
 _PG_COLUMNS = """

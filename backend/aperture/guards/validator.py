@@ -1,26 +1,39 @@
 """SQL validation over a parsed AST.
 
 Regex guards on generated SQL are bypassable with comments, CTEs, or a second
-statement; this parses instead. Three jobs:
+statement; this parses instead. Four jobs:
 
 1. reject anything that is not a single read-only statement,
 2. reject calls to filesystem / network / sleep functions,
-3. inject a row limit when the query does not have one.
-
-`validate_sql` never raises on *user* error -- it returns a result carrying the
-reason, because the repair loop feeds that reason back to the model.
+3. inject a row limit when the query does not have one,
+4. report *why* it failed in a form the repair loop can branch on, and report
+   which tables and columns the query touched so callers can check the model
+   stayed inside the schema it was given.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 import sqlglot
 from sqlglot import exp
 
+FailureKind = Literal[
+    "ok",
+    "empty",
+    "parse",
+    "write",
+    "multi_statement",
+    "banned_function",
+    "not_a_query",
+    "no_projection",
+    "locking",
+]
+
 # Statement types that mutate data or schema. Anything in this set anywhere in
 # the tree fails validation, including inside a CTE.
-WRITE_NODES: tuple[type[exp.Expression], ...] = (
+WRITE_NODES: tuple[type, ...] = (
     exp.Insert,
     exp.Update,
     exp.Delete,
@@ -32,8 +45,7 @@ WRITE_NODES: tuple[type[exp.Expression], ...] = (
     exp.Merge,
 )
 
-# Functions that read files, sleep, or reach the network. Names are matched
-# case-insensitively against `exp.Anonymous` function names.
+# Functions that read files, sleep, or reach the network.
 BANNED_FUNCTIONS = {
     "pg_read_file",
     "pg_read_binary_file",
@@ -51,98 +63,145 @@ BANNED_FUNCTIONS = {
     "sys_exec",
 }
 
-READ_ONLY_ROOTS: tuple[type[exp.Expression], ...] = (
+READ_ONLY_ROOTS: tuple[type, ...] = (
     exp.Select,
     exp.Union,
     exp.Except,
     exp.Intersect,
     exp.Subquery,
     exp.Values,
-    exp.With,
 )
-
-
-class ValidationError(Exception):
-    """Raised only for programmer error, not for a rejected query."""
 
 
 @dataclass
 class ValidationResult:
     ok: bool
+    kind: FailureKind = "ok"
     sql: str | None = None
+    # The statement as parsed, kept even on failure so a repair prompt can show
+    # the model what it actually produced.
+    original_sql: str = ""
     reasons: list[str] = field(default_factory=list)
     limit_injected: bool = False
-    is_write: bool = False
+    tables: list[str] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+    dialect: str = ""
+
+    @property
+    def is_write(self) -> bool:
+        return self.kind == "write"
+
+    @property
+    def repairable(self) -> bool:
+        """Banned functions and writes are refusals, not things to retry."""
+        return self.kind in {"parse", "not_a_query", "no_projection", "multi_statement"}
 
     @property
     def reason(self) -> str:
         return "; ".join(self.reasons)
 
 
-def _has_limit(tree: exp.Expression) -> bool:
-    node = tree
-    if isinstance(node, exp.With):
-        node = node.this
-    return bool(node.args.get("limit")) if isinstance(node, exp.Expression) else False
+def _referenced(tree: exp.Expr) -> tuple[list[str], list[str]]:
+    tables = {t.name for t in tree.find_all(exp.Table) if t.name}
+    columns = {c.name for c in tree.find_all(exp.Column) if c.name}
+    return sorted(tables), sorted(columns)
 
 
-def validate_sql(sql: str, *, dialect: str = "postgres", row_limit: int = 1000) -> ValidationResult:
-    """Parse `sql` and return whether it is safe to execute read-only."""
+def _has_limit(tree: exp.Expr) -> bool:
+    return bool(tree.args.get("limit"))
+
+
+def _has_projection(tree: exp.Expr) -> bool:
+    """A bare `SELECT` parses cleanly and returns one empty row. Reject it."""
+    if isinstance(tree, exp.Select):
+        return bool(tree.expressions)
+    return True
+
+
+def validate_sql(sql: str, *, dialect: str, row_limit: int = 1000) -> ValidationResult:
+    """Parse `sql` and decide whether it is safe to execute read-only.
+
+    `dialect` is required: defaulting it silently mis-parses every non-Postgres
+    database, which is exactly the kind of bug that survives a demo and ruins a
+    benchmark run.
+    """
     if not sql or not sql.strip():
-        return ValidationResult(ok=False, reasons=["empty statement"])
+        return ValidationResult(ok=False, kind="empty", reasons=["empty statement"], dialect=dialect)
 
     try:
         statements = [s for s in sqlglot.parse(sql, dialect=dialect) if s is not None]
     except sqlglot.ParseError as err:
-        return ValidationResult(ok=False, reasons=[f"parse error: {err}"])
+        return ValidationResult(
+            ok=False, kind="parse", original_sql=sql, reasons=[f"parse error: {err}"], dialect=dialect
+        )
 
-    if len(statements) == 0:
-        return ValidationResult(ok=False, reasons=["no statement found"])
+    if not statements:
+        return ValidationResult(
+            ok=False, kind="parse", original_sql=sql, reasons=["no statement found"], dialect=dialect
+        )
     if len(statements) > 1:
         return ValidationResult(
             ok=False,
+            kind="multi_statement",
+            original_sql=sql,
             reasons=[f"expected 1 statement, got {len(statements)}"],
+            dialect=dialect,
         )
 
     tree = statements[0]
-    reasons: list[str] = []
+    tables, columns = _referenced(tree)
+    base = {"original_sql": sql, "tables": tables, "columns": columns, "dialect": dialect}
 
-    write_hits = [n for n in tree.find_all(*WRITE_NODES)]
+    write_hits = list(tree.find_all(*WRITE_NODES))
     if write_hits:
         kinds = sorted({type(n).__name__.upper() for n in write_hits})
         return ValidationResult(
-            ok=False,
-            reasons=[f"write statement not permitted: {', '.join(kinds)}"],
-            is_write=True,
+            ok=False, kind="write", reasons=[f"write statement not permitted: {', '.join(kinds)}"], **base
         )
 
     if not isinstance(tree, READ_ONLY_ROOTS):
         return ValidationResult(
             ok=False,
+            kind="not_a_query",
             reasons=[f"statement type {type(tree).__name__.upper()} is not a read query"],
+            **base,
         )
 
-    for func in tree.find_all(exp.Anonymous):
-        name = (func.name or "").lower()
-        if name in BANNED_FUNCTIONS:
-            reasons.append(f"function not permitted: {name}")
-    for func in tree.find_all(exp.Func):
-        name = (func.sql_name() or "").lower()
-        if name in BANNED_FUNCTIONS:
-            reasons.append(f"function not permitted: {name}")
+    # SELECT ... INTO creates a table; the read-only role would refuse it, but
+    # the validator should not be the layer that lets it through.
+    if tree.args.get("into"):
+        return ValidationResult(
+            ok=False, kind="write", reasons=["SELECT ... INTO creates a table"], **base
+        )
 
-    if reasons:
-        return ValidationResult(ok=False, reasons=reasons)
+    if tree.args.get("locks"):
+        return ValidationResult(
+            ok=False, kind="locking", reasons=["row locking (FOR UPDATE/SHARE) not permitted"], **base
+        )
+
+    if not _has_projection(tree):
+        return ValidationResult(
+            ok=False, kind="no_projection", reasons=["query selects no columns"], **base
+        )
+
+    banned = []
+    for func in tree.find_all(exp.Func):
+        name = func.name if isinstance(func, exp.Anonymous) else ""
+        if not name:
+            try:
+                name = func.sql_name()
+            except NotImplementedError:
+                name = ""
+        if name.lower() in BANNED_FUNCTIONS:
+            banned.append(f"function not permitted: {name.lower()}")
+    if banned:
+        return ValidationResult(ok=False, kind="banned_function", reasons=sorted(set(banned)), **base)
 
     limit_injected = False
-    if not _has_limit(tree):
-        target = tree.this if isinstance(tree, exp.With) else tree
-        if isinstance(target, (exp.Select, exp.Union, exp.Except, exp.Intersect)):
-            tree = tree.limit(row_limit)
-            limit_injected = True
+    if isinstance(tree, exp.Query) and not _has_limit(tree):
+        tree = tree.limit(row_limit)
+        limit_injected = True
 
     return ValidationResult(
-        ok=True,
-        sql=tree.sql(dialect=dialect, pretty=True),
-        limit_injected=limit_injected,
+        ok=True, kind="ok", sql=tree.sql(dialect=dialect, pretty=True), limit_injected=limit_injected, **base
     )

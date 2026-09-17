@@ -47,7 +47,28 @@ class Ledger:
     def default(cls) -> "Ledger":
         home = Path(os.path.expanduser(settings().home_dir))
         home.mkdir(parents=True, exist_ok=True)
-        return cls(path=home / "usage.jsonl")
+        ledger = cls(path=home / "usage.jsonl")
+        ledger.replay()
+        return ledger
+
+    def replay(self) -> None:
+        """Restore cumulative usage from disk.
+
+        A per-process ceiling defeats the purpose: crash an overnight benchmark
+        at $9.40, restart, and a fresh counter happily spends another $10.
+        """
+        if not self.path.exists():
+            return
+        for line in self.path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            self.total.input_tokens += int(row.get("input_tokens", 0))
+            self.total.output_tokens += int(row.get("output_tokens", 0))
+            self.total.calls += 1
 
     def record(
         self,
