@@ -29,10 +29,40 @@ status counts as delivered, or which date range 'last month' means). Keep it to 
 one sentence."""
 
 
-def generate_prompt(question: str, schema_section: str, dialect: str) -> list[tuple[str, str]]:
+def history_section(history: list[dict] | None) -> str:
+    """Earlier turns, so a follow-up has something to refer to.
+
+    "Now show it by city" is unanswerable without the query it is amending, and
+    a model asked to guess will invent columns. Only the question and the SQL
+    are included -- results would dominate the prompt and add nothing.
+    """
+    if not history:
+        return ""
+    lines = []
+    for turn in history[-3:]:
+        question = (turn.get("question") or "").strip()
+        sql = " ".join((turn.get("sql") or "").split())
+        if not question:
+            continue
+        lines.append(f"  Q: {question}")
+        if sql:
+            lines.append(f"  SQL: {sql}")
+    if not lines:
+        return ""
+    return (
+        "EARLIER IN THIS CONVERSATION (a follow-up usually amends the last query)\n"
+        + "\n".join(lines)
+    )
+
+
+def generate_prompt(
+    question: str, schema_section: str, dialect: str, history: list[dict] | None = None
+) -> list[tuple[str, str]]:
+    earlier = history_section(history)
+    context = f"{schema_section}\n\n{earlier}" if earlier else schema_section
     return [
         ("system", GENERATE_SYSTEM.format(dialect=dialect)),
-        ("human", f"{schema_section}\n\nQUESTION: {question}\n\n{ASSUMPTIONS_INSTRUCTION}"),
+        ("human", f"{context}\n\nQUESTION: {question}\n\n{ASSUMPTIONS_INSTRUCTION}"),
     ]
 
 

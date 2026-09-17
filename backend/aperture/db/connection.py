@@ -30,6 +30,27 @@ SQLSTATE_QUERY_CANCELED = "57014"
 SQLSTATE_INSUFFICIENT_PRIVILEGE = "42501"
 SQLSTATE_READ_ONLY_TRANSACTION = "25006"
 
+# Failure classes no rewrite can fix. Retrying these burns the repair budget and
+# ends in "I could not produce a working query", which blames the query for a
+# broken connection.
+INFRASTRUCTURE_SQLSTATE_CLASSES = (
+    "08",  # connection exception
+    "28",  # invalid authorization specification
+    "3D",  # invalid catalog name
+    "53",  # insufficient resources
+    "58",  # system error
+)
+INFRASTRUCTURE_MESSAGES = (
+    "connection refused",
+    "could not connect",
+    "connection failed",
+    "password authentication failed",
+    "no password supplied",
+    "server closed the connection",
+    "timeout expired",
+    "unable to open database file",
+)
+
 
 @dataclass
 class DbError:
@@ -56,6 +77,31 @@ class DbError:
     @property
     def is_timeout(self) -> bool:
         return self.sqlstate == SQLSTATE_QUERY_CANCELED
+
+    @property
+    def is_infrastructure(self) -> bool:
+        """Whether the database, not the query, is the problem."""
+        if self.sqlstate[:2] in INFRASTRUCTURE_SQLSTATE_CLASSES:
+            return True
+        if self.sqlstate == SQLSTATE_INSUFFICIENT_PRIVILEGE:
+            return True
+        haystack = f"{self.primary} {self.raw}".lower()
+        return any(marker in haystack for marker in INFRASTRUCTURE_MESSAGES)
+
+    @property
+    def advice(self) -> str:
+        """What a human should do about an infrastructure failure."""
+        if self.sqlstate.startswith("28") or "password authentication" in self.raw.lower():
+            return "Check the username and password for this connection."
+        if self.sqlstate.startswith("08") or "connect" in self.raw.lower():
+            return "Check that the database is running and reachable at that host and port."
+        if self.sqlstate == SQLSTATE_INSUFFICIENT_PRIVILEGE:
+            return "The connected role lacks SELECT on the tables involved."
+        if self.sqlstate.startswith("3D"):
+            return "That database name does not exist on the server."
+        if self.sqlstate.startswith("53"):
+            return "The server is out of resources -- often too many open connections."
+        return "Check the connection settings."
 
     @property
     def is_schema_error(self) -> bool:

@@ -74,6 +74,12 @@ class Settings(BaseSettings):
         r"email|phone|mobile|address|ssn|pan|aadhaar|passport|password|pin|token|card|cvv|secret"
     )
 
+    # optional Google sign-in; when empty, the local profile is used and every
+    # feature still works
+    google_client_id: str = ""
+    # session signing key; generated into ~/.aperture/session.key when unset
+    session_secret: str = ""
+
     # where Aperture keeps its own state: checkpoints, schema cache, ledger
     home_dir: str = "~/.aperture"
 

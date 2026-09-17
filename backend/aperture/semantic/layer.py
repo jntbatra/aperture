@@ -12,6 +12,7 @@ and only the definitions a question actually touches are put in the prompt.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,6 +21,18 @@ import yaml
 from ..schema.linker import tokenize
 
 log = logging.getLogger(__name__)
+
+# Qualified references inside a metric definition, e.g. orders."totalAmount".
+_QUALIFIED = re.compile(r'\b([A-Za-z_]\w*)\."?(\w+)"?')
+
+
+def _all_qualified(columns_by_table: dict[str, set[str]]) -> set[str]:
+    return {
+        f"{table}.{column}"
+        for table, columns in columns_by_table.items()
+        for column in columns
+    }
+
 
 
 @dataclass
@@ -34,8 +47,16 @@ class Metric:
 
     @property
     def vocabulary(self) -> set[str]:
-        words = tokenize(self.name) | tokenize(" ".join(self.synonyms))
-        return words
+        return tokenize(self.name) | tokenize(" ".join(self.synonyms))
+
+    @property
+    def referenced_columns(self) -> set[str]:
+        """Qualified table.column references appearing in the definition."""
+        text = f"{self.expression} {self.filter}"
+        return {
+            f"{table}.{column}"
+            for table, column in _QUALIFIED.findall(text)
+        }
 
     def render(self) -> str:
         lines = [f"- {self.name}: {self.description}".rstrip(": ")]
@@ -53,19 +74,22 @@ class SemanticLayer:
     metrics: list[Metric] = field(default_factory=list)
     conventions: list[str] = field(default_factory=list)
 
-    def for_tables(self, available: set[str]) -> SemanticLayer:
+    def for_schema(self, columns_by_table: dict[str, set[str]]) -> SemanticLayer:
         """Restrict this layer to definitions the connected schema supports.
 
-        Definitions are written for one database. Applied to another they are
-        actively harmful: a rule saying money is stored in paise made a CSV of
-        dollar amounts get reported in rupees. A metric survives only if every
-        table it names exists, and the conventions travel with the metrics --
-        if none apply, neither do they.
+        Matching on table names alone is not enough: an uploaded workbook with a
+        sheet called "orders" matched a metric written for a different database
+        called orders, and a rule saying amounts are stored in paise divided a
+        spreadsheet of dollars by 100. A definition therefore applies only when
+        every column it actually references exists too. Conventions travel with
+        the metrics -- if none apply, neither do they.
         """
         kept = [
             metric
             for metric in self.metrics
-            if metric.tables and set(metric.tables) <= available
+            if metric.tables
+            and set(metric.tables) <= set(columns_by_table)
+            and metric.referenced_columns <= _all_qualified(columns_by_table)
         ]
         return SemanticLayer(metrics=kept, conventions=self.conventions if kept else [])
 

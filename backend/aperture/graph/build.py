@@ -20,7 +20,7 @@ from .state import AnalystState
 # Statuses that end a run. "answered" is deliberately absent: it is set by the
 # final nodes, and treating it as a stop condition mid-run lets a previous
 # turn's status terminate the current one.
-TERMINAL_STATUSES = {"refused", "over_budget", "timed_out"}
+TERMINAL_STATUSES = {"refused", "over_budget", "timed_out", "unavailable"}
 
 
 def checkpoint_path() -> Path:
@@ -72,6 +72,8 @@ def _after_validate(state: AnalystState) -> str:
 
 
 def _after_cost_guard(state: AnalystState) -> str:
+    if state.get("status") in TERMINAL_STATUSES:
+        return END
     return "diagnose" if state.get("last_error") else "execute"
 
 
@@ -119,7 +121,7 @@ def build_analyst(ctx: AnalystContext | None = None, *, checkpointer=None):
     builder.add_edge("link_schema", "generate_sql")
     builder.add_conditional_edges("generate_sql", _after_generate, ["validate", "diagnose", END])
     builder.add_conditional_edges("validate", _after_validate, ["cost_guard", "diagnose", END])
-    builder.add_conditional_edges("cost_guard", _after_cost_guard, ["execute", "diagnose"])
+    builder.add_conditional_edges("cost_guard", _after_cost_guard, ["execute", "diagnose", END])
     builder.add_conditional_edges(
         "execute", _after_execute, ["verify", "diagnose", "diagnose_empty", END]
     )

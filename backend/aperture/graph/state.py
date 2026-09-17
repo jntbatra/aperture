@@ -24,6 +24,8 @@ class AnalystState(TypedDict, total=False):
     # input
     question: str
     thread_id: str
+    # earlier turns in this conversation: [{question, sql}]
+    history: list[dict]
 
     # routing
     intent: Literal["query", "chitchat", "schema_question"]

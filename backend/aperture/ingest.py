@@ -17,7 +17,7 @@ import os
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from .config import settings
@@ -259,3 +259,145 @@ def active_database_url() -> str:
     from .registry import active_url
 
     return active_url()
+
+
+def _rows_to_text(rows: list[list]) -> list[list[str]]:
+    """Render spreadsheet cells as text so one type inferrer serves both formats."""
+    rendered = []
+    for row in rows:
+        rendered.append(
+            [
+                ""
+                if cell is None
+                else (
+                    cell.isoformat(sep=" ")
+                    if isinstance(cell, datetime)
+                    else (cell.isoformat() if isinstance(cell, date) else str(cell))
+                )
+                for cell in row
+            ]
+        )
+    return rendered
+
+
+def load_excel(
+    source: str | Path,
+    *,
+    dataset: str | None = None,
+    sheet: str | None = None,
+) -> IngestResult:
+    """Load an .xlsx workbook. Every sheet becomes a table in one database.
+
+    A workbook is usually several related tables, so flattening it to a single
+    sheet would throw away exactly the structure that makes it worth querying.
+    """
+    from openpyxl import load_workbook
+
+    source = Path(source).expanduser()
+    if not source.exists():
+        raise FileNotFoundError(source)
+
+    dataset = safe_identifier(dataset or source.stem, fallback="workbook")
+    target = datasets_dir() / f"{dataset}.db"
+    if target.exists():
+        target.unlink()
+
+    workbook = load_workbook(source, read_only=True, data_only=True)
+    sheets = [sheet] if sheet else workbook.sheetnames
+
+    connection = sqlite3.connect(str(target))
+    total_rows = 0
+    first_table = ""
+    columns: list[ColumnPlan] = []
+    try:
+        for name in sheets:
+            worksheet = workbook[name]
+            rows = _rows_to_text([list(r) for r in worksheet.iter_rows(values_only=True)])
+            if not rows:
+                continue
+            header, body = rows[0], rows[1:]
+            if not body:
+                continue
+
+            table_name = safe_identifier(name, fallback="sheet")
+            plans = plan_columns(header, body[:SAMPLE_ROWS])
+            quoted = ", ".join(f'"{c.name}" {c.sql_type}' for c in plans)
+            connection.execute(f'CREATE TABLE "{table_name}" ({quoted})')
+
+            placeholders = ", ".join("?" for _ in plans)
+            insert = f'INSERT INTO "{table_name}" VALUES ({placeholders})'
+            batch = []
+            for row in body:
+                if not any(cell.strip() for cell in row):
+                    continue
+                padded = list(row) + [""] * (len(plans) - len(row))
+                batch.append(tuple(_coerce(padded[i], c.sql_type) for i, c in enumerate(plans)))
+                if len(batch) >= 1000:
+                    connection.executemany(insert, batch)
+                    total_rows += len(batch)
+                    batch.clear()
+            if batch:
+                connection.executemany(insert, batch)
+                total_rows += len(batch)
+
+            if not first_table:
+                first_table, columns = table_name, plans
+        connection.commit()
+    finally:
+        connection.close()
+        workbook.close()
+
+    if not first_table:
+        raise ValueError(f"{source} contains no readable sheets")
+
+    return IngestResult(
+        database_url=f"sqlite:///{target}",
+        path=target,
+        table=first_table,
+        rows=total_rows,
+        columns=columns,
+    )
+
+
+def adopt_sqlite(source: str | Path, *, dataset: str | None = None) -> IngestResult:
+    """Register an existing SQLite file, copied so the original is never written."""
+    source = Path(source).expanduser()
+    if not source.exists():
+        raise FileNotFoundError(source)
+
+    dataset = safe_identifier(dataset or source.stem, fallback="database")
+    target = datasets_dir() / f"{dataset}.db"
+    target.write_bytes(source.read_bytes())
+
+    connection = sqlite3.connect(str(target))
+    try:
+        tables = [
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        ]
+        rows = 0
+        for name in tables:
+            rows += connection.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0]
+    finally:
+        connection.close()
+
+    return IngestResult(
+        database_url=f"sqlite:///{target}",
+        path=target,
+        table=tables[0] if tables else "",
+        rows=rows,
+        columns=[],
+    )
+
+
+def load_any(source: str | Path, *, dataset: str | None = None) -> IngestResult:
+    """Load whatever was handed over, by extension."""
+    source = Path(source).expanduser()
+    suffix = source.suffix.lower()
+    if suffix in {".xlsx", ".xlsm"}:
+        return load_excel(source, dataset=dataset)
+    if suffix in {".db", ".sqlite", ".sqlite3"}:
+        return adopt_sqlite(source, dataset=dataset)
+    return load_csv(source, dataset=dataset)

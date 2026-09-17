@@ -104,7 +104,11 @@ class AnalystContext:
         db = db or Database.active()
         bundle = load_schema(db, refresh=refresh)
         linker = SchemaLinker(bundle.snapshot, bundle.profile)
-        semantic = SemanticLayer.default().for_tables(set(bundle.snapshot.tables))
+        columns_by_table = {
+            name: {column.name for column in table.columns}
+            for name, table in bundle.snapshot.tables.items()
+        }
+        semantic = SemanticLayer.default().for_schema(columns_by_table)
         return cls(db=db, bundle=bundle, linker=linker, semantic=semantic)
 
     @property
@@ -248,7 +252,12 @@ def make_nodes(ctx: AnalystContext) -> dict:
             )
             label = f"repair-{attempts}"
         else:
-            messages = generate_prompt(state["question"], state["schema_section"], ctx.dialect)
+            messages = generate_prompt(
+                state["question"],
+                state["schema_section"],
+                ctx.dialect,
+                history=state.get("history"),
+            )
             label = "generate"
 
         llm = build_llm(temperature=temperature, max_tokens=max_tokens)
@@ -361,6 +370,8 @@ def make_nodes(ctx: AnalystContext) -> dict:
             }
 
         error = estimate.error
+        if error and error.is_infrastructure:
+            return _unavailable(state, error, "cost_guard")
         return {
             "last_error": error.for_prompt() if error else estimate.reason,
             # Keep the sqlstate: "invalid" says the SQL is wrong, the code says how.
@@ -368,6 +379,21 @@ def make_nodes(ctx: AnalystContext) -> dict:
             "repair_note": "",
             "trace": trace,
         }
+
+    def _unavailable(state: AnalystState, error, where: str) -> AnalystState:
+        """Terminate cleanly: the database is unreachable, the query is fine."""
+        update: AnalystState = {
+            "status": "unavailable",
+            "answer": (
+                f"The database could not be reached, so the question was not run.\n\n"
+                f"{error.primary or error.raw}\n\n{error.advice}"
+            ),
+            "last_error": error.for_prompt(),
+            "last_error_kind": error.sqlstate or "unavailable",
+            "trace": _note(state, where, unavailable=True),
+        }
+        _persist({**state, **update})
+        return update
 
     def execute(state: AnalystState) -> AnalystState:
         if _over_deadline(state):
@@ -381,6 +407,8 @@ def make_nodes(ctx: AnalystContext) -> dict:
         try:
             result = ctx.db.run(state["sql"])
         except QueryFailed as err:
+            if err.error.is_infrastructure:
+                return _unavailable(state, err.error, "execute")
             return {
                 "last_error": err.error.for_prompt(),
                 "last_error_kind": err.error.sqlstate or "db_error",
