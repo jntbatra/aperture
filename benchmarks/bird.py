@@ -178,6 +178,12 @@ def evaluate(
     projected_ceiling: float = 6.0,
     out_path: Path | None = None,
 ) -> Report:
+    import os
+
+    # Benchmarks are self-sufficient: there is nobody to ask, and each question
+    # is complete by definition.
+    os.environ.setdefault("APERTURE_CLARIFY", "false")
+
     from aperture.budget import LEDGER
     from aperture.config import settings
     from aperture.db import Database

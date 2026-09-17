@@ -20,7 +20,7 @@ from .state import AnalystState
 # Statuses that end a run. "answered" is deliberately absent: it is set by the
 # final nodes, and treating it as a stop condition mid-run lets a previous
 # turn's status terminate the current one.
-TERMINAL_STATUSES = {"refused", "over_budget", "timed_out", "unavailable"}
+TERMINAL_STATUSES = {"refused", "over_budget", "timed_out", "unavailable", "needs_clarification"}
 
 
 def checkpoint_path() -> Path:
@@ -55,6 +55,10 @@ async def async_checkpointer():
 
 def _after_route(state: AnalystState) -> str:
     return "link_schema" if state.get("intent") == "query" else "small_talk"
+
+
+def _after_clarify(state: AnalystState) -> str:
+    return END if state.get("status") == "needs_clarification" else "generate_sql"
 
 
 def _after_generate(state: AnalystState) -> str:
@@ -118,7 +122,8 @@ def build_analyst(ctx: AnalystContext | None = None, *, checkpointer=None):
     builder.add_edge(START, "route")
     builder.add_conditional_edges("route", _after_route, ["link_schema", "small_talk"])
     builder.add_edge("small_talk", END)
-    builder.add_edge("link_schema", "generate_sql")
+    builder.add_edge("link_schema", "clarify")
+    builder.add_conditional_edges("clarify", _after_clarify, ["generate_sql", END])
     builder.add_conditional_edges("generate_sql", _after_generate, ["validate", "diagnose", END])
     builder.add_conditional_edges("validate", _after_validate, ["cost_guard", "diagnose", END])
     builder.add_conditional_edges("cost_guard", _after_cost_guard, ["execute", "diagnose", END])

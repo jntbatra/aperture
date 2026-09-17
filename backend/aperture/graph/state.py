@@ -71,6 +71,8 @@ class AnalystState(TypedDict, total=False):
     # Deterministic post-execution checks: fan-out, dropped groups
     verification: list[dict]
     insights: list[dict]
+    clarifying_question: str
+    clarify_options: list[str]
     suggestions: list[dict]
     answer: str
     chart_spec: dict | None

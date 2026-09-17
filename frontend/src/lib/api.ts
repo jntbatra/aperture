@@ -12,6 +12,9 @@ export interface FinalPayload {
   chart_spec?: Record<string, unknown> | null
   assumptions?: string
   verification?: { kind: string; message: string }[]
+  insights?: { kind: string; message: string }[]
+  clarifying_question?: string
+  clarify_options?: string[]
   suggestions?: { text: string; reason: string }[]
   status?: string
   attempts?: number

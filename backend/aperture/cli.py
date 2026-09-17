@@ -60,6 +60,7 @@ NODE_LABELS = {
     "execute": "executing",
     "diagnose": "diagnosing failure",
     "diagnose_empty": "explaining empty result",
+    "clarify": "checking the question",
     "verify": "verifying result",
     "narrate": "summarising",
     "chart": "choosing chart",
@@ -71,6 +72,7 @@ NODE_LABELS = {
 STEP_MARKER = "\u203a"
 
 STATUS_STYLES = {
+    "needs_clarification": "cyan",
     "answered": "green",
     "empty": "yellow",
     "refused": "red",
@@ -146,6 +148,9 @@ def ask(
         if final.get("truncated"):
             console.print("[dim]… result truncated at the row limit[/dim]")
         console.print()
+
+    if final.get("clarify_options"):
+        console.print("[dim]options:[/dim] " + "  ".join(f"[cyan]{o}[/cyan]" for o in final["clarify_options"]))
 
     status = final.get("status", "unknown")
     console.print(Panel(final.get("answer", "(no answer)"), title=status, border_style=STATUS_STYLES.get(status, "white")))

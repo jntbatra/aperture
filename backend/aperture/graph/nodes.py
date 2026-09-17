@@ -16,6 +16,7 @@ from ..budget import LEDGER, BudgetExceeded
 from ..cache import lookup as cache_lookup
 from ..cache import remember as cache_remember
 from ..charts import build_spec
+from ..clarify import needs_clarification
 from ..config import settings
 from ..db import Database, SchemaBundle, load_schema
 from ..db.connection import QueryFailed
@@ -241,6 +242,37 @@ def make_nodes(ctx: AnalystContext) -> dict:
             ),
         }
 
+    def clarify(state: AnalystState) -> AnalystState:
+        """Ask one question when the schema shows the request is underspecified.
+
+        Skipped once the conversation has already asked: a second question in a
+        row reads as stalling, and the user's reply is now in the history.
+        """
+        if not cfg.clarify or state.get("history"):
+            return {"trace": _note(state, "clarify", skipped=True)}
+
+        linked = ctx.linker.link(state["question"])
+        finding = needs_clarification(
+            state["question"],
+            linked,
+            ctx.bundle.snapshot,
+            ctx.bundle.profile,
+            metric_names={m.name for m in ctx.semantic.match(state["question"])},
+        )
+        if not finding:
+            return {"trace": _note(state, "clarify", ambiguous=False)}
+
+        options = ", ".join(finding.options)
+        update: AnalystState = {
+            "status": "needs_clarification",
+            "clarifying_question": finding.question,
+            "clarify_options": finding.options,
+            "answer": f"{finding.question}\n\nOptions: {options}",
+            "trace": _note(state, "clarify", ambiguous=True, reason=finding.reason),
+        }
+        _persist({**state, **update})
+        return update
+
     def generate_sql(state: AnalystState) -> AnalystState:
         if _over_deadline(state):
             update: AnalystState = {
@@ -273,6 +305,7 @@ def make_nodes(ctx: AnalystContext) -> dict:
                 state["schema_section"],
                 ctx.dialect,
                 history=state.get("history"),
+                clarify=cfg.clarify and not state.get("history"),
             )
             label = "generate"
 
@@ -334,6 +367,18 @@ def make_nodes(ctx: AnalystContext) -> dict:
             if line.strip().upper().startswith("ASSUMPTIONS:"):
                 assumptions = line.split(":", 1)[1].strip()
                 break
+
+        for line in text.splitlines():
+            if line.strip().upper().startswith("CLARIFY:"):
+                asked = line.split(":", 1)[1].strip()
+                if asked:
+                    update.update(
+                        status="needs_clarification",
+                        clarifying_question=asked,
+                        answer=asked,
+                    )
+                    _persist({**state, **update})
+                    return update
 
         try:
             sql = extract_sql(text, dialect=ctx.dialect)
@@ -760,6 +805,7 @@ def make_nodes(ctx: AnalystContext) -> dict:
         "route": route,
         "small_talk": small_talk,
         "link_schema": link_schema,
+        "clarify": clarify,
         "generate_sql": generate_sql,
         "validate": validate,
         "cost_guard": cost_guard,

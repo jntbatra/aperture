@@ -28,6 +28,16 @@ ASSUMPTIONS: stating any business definition you chose (for example which \
 status counts as delivered, or which date range 'last month' means). Keep it to \
 one sentence."""
 
+CLARIFY_INSTRUCTION = """If answering would require inventing a business \
+definition that changes the result -- which of two measures to rank by, which \
+of several dates defines a period, which of two similar tables is meant -- do \
+not guess. Reply with exactly one line:
+
+CLARIFY: <your single question>
+
+Only do this when the choice genuinely changes the answer. If the schema or the \
+metric definitions settle it, write the SQL."""
+
 
 def history_section(history: list[dict] | None) -> str:
     """Earlier turns, so a follow-up has something to refer to.
@@ -56,13 +66,20 @@ def history_section(history: list[dict] | None) -> str:
 
 
 def generate_prompt(
-    question: str, schema_section: str, dialect: str, history: list[dict] | None = None
+    question: str,
+    schema_section: str,
+    dialect: str,
+    history: list[dict] | None = None,
+    clarify: bool = False,
 ) -> list[tuple[str, str]]:
     earlier = history_section(history)
     context = f"{schema_section}\n\n{earlier}" if earlier else schema_section
+    instructions = ASSUMPTIONS_INSTRUCTION
+    if clarify:
+        instructions = f"{CLARIFY_INSTRUCTION}\n\n{instructions}"
     return [
         ("system", GENERATE_SYSTEM.format(dialect=dialect)),
-        ("human", f"{context}\n\nQUESTION: {question}\n\n{ASSUMPTIONS_INSTRUCTION}"),
+        ("human", f"{context}\n\nQUESTION: {question}\n\n{instructions}"),
     ]
 
 

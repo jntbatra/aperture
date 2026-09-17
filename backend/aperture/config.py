@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     bedrock_max_retries: int = 8
     bedrock_read_timeout: int = 120
 
+    # Ask a clarifying question when the schema shows the question is
+    # underspecified. Benchmarks turn this off: there is nobody to ask, and the
+    # question is complete by definition.
+    clarify: bool = True
+
     # guards
     max_repair_attempts: int = 3
     max_empty_retries: int = 1

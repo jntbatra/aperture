@@ -287,6 +287,8 @@ async def ask(body: AskRequest, user: User = Depends(current_user)):
             "assumptions": final.get("assumptions"),
             "verification": final.get("verification", []),
             "insights": final.get("insights", []),
+            "clarifying_question": final.get("clarifying_question", ""),
+            "clarify_options": final.get("clarify_options", []),
             "suggestions": final.get("suggestions", []),
             "status": final.get("status"),
             "attempts": final.get("attempts", 0),

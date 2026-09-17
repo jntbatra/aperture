@@ -4,6 +4,7 @@ import { ResultTable } from './ResultTable'
 import { Timeline, type Step } from './Timeline'
 
 const STATUS_STYLE: Record<string, string> = {
+  needs_clarification: 'border-sky-500/40 bg-sky-500/5',
   answered: 'border-(--color-accent)/40 bg-(--color-accent)/5',
   empty: 'border-amber-500/40 bg-amber-500/5',
   refused: 'border-rose-500/40 bg-rose-500/5',
@@ -79,6 +80,28 @@ export function Turn({
           {final.answer}
         </div>
       )}
+
+      {final?.clarify_options && final.clarify_options.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-(--color-muted)">options:</span>
+          {final.clarify_options.map((option) => (
+            <button
+              key={option}
+              onClick={() => onAsk(option)}
+              disabled={busy}
+              className="rounded-full border border-sky-500/40 bg-sky-500/5 px-3 py-1 text-xs text-sky-100 transition hover:border-sky-400 disabled:opacity-40"
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {final?.insights?.map((insight) => (
+        <p key={insight.kind} className="text-xs text-(--color-muted)">
+          note · {insight.message}
+        </p>
+      ))}
 
       {final?.assumptions && (
         <p className="text-xs text-(--color-muted)">assumptions: {final.assumptions}</p>
