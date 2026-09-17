@@ -49,7 +49,9 @@ export async function askStream(
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-    buffer += decoder.decode(value, { stream: true })
+    // Normalise line endings first: the server sends CRLF, so a naive split on
+    // "\n\n" never finds a frame boundary and the stream is silently dropped.
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
 
     let boundary = buffer.indexOf('\n\n')
     while (boundary !== -1) {

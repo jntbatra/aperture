@@ -80,13 +80,21 @@ def build_spec(
         }
 
     x, y = chosen
+    x_encoding: dict = {"field": x.name, "type": x.type}
+    if x.type == "temporal":
+        # Monthly buckets on a raw temporal axis get ticked every fortnight,
+        # which labels a five-point series with eight meaningless dates.
+        values = [str(record.get(x.name) or "") for record in data]
+        if values and all(value[8:10] == "01" for value in values if len(value) >= 10):
+            x_encoding["timeUnit"] = "yearmonth"
+
     return {
         "$schema": VEGA_LITE_SCHEMA,
         "title": title or f"{y.name} by {x.name}",
         "data": {"values": data},
         "mark": {"type": _MARK_FOR[mark], "point": mark == "line"},
         "encoding": {
-            "x": {"field": x.name, "type": x.type},
+            "x": x_encoding,
             "y": {"field": y.name, "type": y.type},
             "tooltip": [
                 {"field": x.name, "type": x.type},

@@ -81,9 +81,15 @@ class Report:
         return "\n".join(lines)
 
 
+def databases_present() -> bool:
+    return any(
+        "downloads" not in candidate.parts for candidate in HERE.rglob("*.sqlite")
+    )
+
+
 def ensure_data() -> None:
     """Unpack the databases and fetch the question file if needed."""
-    if not DB_DIR.exists():
+    if not databases_present():
         if not DOWNLOAD.exists():
             raise SystemExit(
                 f"missing {DOWNLOAD}. Download it first:\n"
@@ -104,12 +110,27 @@ def ensure_data() -> None:
 
 
 def questions_path() -> Path:
+    """Prefer the question file shipped alongside the databases.
+
+    The archive and the HuggingFace copy are both valid, but the bundled one is
+    guaranteed to match the databases that were just unpacked.
+    """
+    bundled = sorted(HERE.rglob("mini_dev_sqlite.json"))
+    for candidate in bundled:
+        if "downloads" not in candidate.parts:
+            return candidate
     return DATA_DIR / "mini_dev_sqlite.json"
 
 
 def find_database(db_id: str) -> Path | None:
-    for candidate in DATA_DIR.rglob(f"{db_id}.sqlite"):
-        return candidate
+    """Locate a database by id.
+
+    The archive unpacks to minidev/MINIDEV/dev_databases/, not to the layout the
+    documentation describes, so the whole benchmark directory is searched.
+    """
+    for candidate in HERE.rglob(f"{db_id}.sqlite"):
+        if "downloads" not in candidate.parts:
+            return candidate
     return None
 
 
