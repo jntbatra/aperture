@@ -144,8 +144,11 @@ def results_match(gold: list[tuple], predicted: list[tuple]) -> bool:
     """Compare result sets the way BIRD does: as multisets of rows."""
     if len(gold) != len(predicted):
         return False
-    normalise = lambda rows: Counter(tuple(str(v) for v in row) for row in rows)
-    return normalise(gold) == normalise(predicted)
+
+    def as_multiset(rows: list[tuple]) -> Counter:
+        return Counter(tuple(str(value) for value in row) for row in rows)
+
+    return as_multiset(gold) == as_multiset(predicted)
 
 
 def evaluate(

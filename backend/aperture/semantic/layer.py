@@ -54,7 +54,7 @@ class SemanticLayer:
     conventions: list[str] = field(default_factory=list)
 
     @classmethod
-    def load(cls, path: str | Path) -> "SemanticLayer":
+    def load(cls, path: str | Path) -> SemanticLayer:
         path = Path(path)
         if not path.exists():
             return cls()
@@ -63,7 +63,7 @@ class SemanticLayer:
         return cls(metrics=metrics, conventions=list(data.get("conventions") or []))
 
     @classmethod
-    def default(cls) -> "SemanticLayer":
+    def default(cls) -> SemanticLayer:
         return cls.load(Path(__file__).parent / "semantic.yaml")
 
     def match(self, question: str, *, limit: int = 4) -> list[Metric]:

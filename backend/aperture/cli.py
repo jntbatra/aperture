@@ -10,11 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.json import JSON
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
@@ -42,6 +40,9 @@ NODE_LABELS = {
     "exhausted": "giving up",
     "small_talk": "answering",
 }
+
+# Rendered per step in the live timeline.
+STEP_MARKER = "\u203a"
 
 STATUS_STYLES = {
     "answered": "green",
@@ -74,7 +75,7 @@ def ask(
     question: str = typer.Argument(..., help="Question to answer."),
     thread: str = typer.Option("cli", "--thread", "-t", help="Conversation thread id."),
     show_sql: bool = typer.Option(True, "--sql/--no-sql"),
-    spec_out: Optional[str] = typer.Option(None, "--spec-out", help="Write the chart spec here."),
+    spec_out: str | None = typer.Option(None, "--spec-out", help="Write the chart spec here."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Answer one question end to end."""
@@ -106,7 +107,7 @@ def ask(
                 detail = f"{update.get('row_count', 0)} rows in {update.get('elapsed_ms', 0):.0f}ms"
             elif node == "diagnose":
                 detail = f"attempt {update.get('attempts', 0)}"
-            console.print(f"  [cyan]›[/cyan] {label}" + (f" [dim]({detail})[/dim]" if detail else ""))
+            console.print(f"  [cyan]{STEP_MARKER}[/cyan] {label}" + (f" [dim]({detail})[/dim]" if detail else ""))
             final.update(update)
 
     console.print()
@@ -143,7 +144,7 @@ def ask(
 @app.command()
 def profile(
     refresh: bool = typer.Option(False, "--refresh", help="Re-read the schema."),
-    table: Optional[str] = typer.Option(None, "--table", help="Show one table in full."),
+    table: str | None = typer.Option(None, "--table", help="Show one table in full."),
 ) -> None:
     """Show what Aperture knows about the database."""
     db = Database.from_settings()

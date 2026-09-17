@@ -11,7 +11,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from ..budget import LEDGER, BudgetExceeded
+from ..budget import BudgetExceeded
 from ..charts import build_spec
 from ..config import settings
 from ..db import Database, SchemaBundle, load_schema
@@ -48,7 +48,7 @@ class AnalystContext:
     trace_sink: list = field(default_factory=list)
 
     @classmethod
-    def create(cls, db: Database | None = None, *, refresh: bool = False) -> "AnalystContext":
+    def create(cls, db: Database | None = None, *, refresh: bool = False) -> AnalystContext:
         db = db or Database.from_settings()
         bundle = load_schema(db, refresh=refresh)
         linker = SchemaLinker(bundle.snapshot, bundle.profile)
@@ -76,9 +76,7 @@ def make_nodes(ctx: AnalystContext) -> dict:
     def route(state: AnalystState) -> AnalystState:
         question = (state.get("question") or "").strip()
         lowered = question.lower().rstrip("?!. ")
-        if not question:
-            intent = "chitchat"
-        elif lowered in GREETINGS or len(lowered) < 3:
+        if not question or lowered in GREETINGS or len(lowered) < 3:
             intent = "chitchat"
         elif any(marker in lowered for marker in META_MARKERS):
             intent = "schema_question"

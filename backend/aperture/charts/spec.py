@@ -29,7 +29,7 @@ def jsonable(value: Any) -> Any:
 
 
 def records(columns: list[str], rows: list[list[Any]]) -> list[dict]:
-    return [{c: jsonable(v) for c, v in zip(columns, row)} for row in rows]
+    return [{c: jsonable(v) for c, v in zip(columns, row, strict=False)} for row in rows]
 
 
 def build_spec(

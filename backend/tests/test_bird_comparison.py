@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks"))
 
-from bird import results_match  # noqa: E402
+from bird import results_match
 
 
 def test_identical_results_match():

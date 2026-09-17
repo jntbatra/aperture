@@ -8,8 +8,8 @@ in table count.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Callable
 
 from sqlalchemy import text
 
@@ -54,7 +54,7 @@ class TableInfo:
     def column(self, name: str) -> ColumnInfo | None:
         return next((c for c in self.columns if c.name == name), None)
 
-    def ddl(self, annotate: "Callable[[str, str], str] | None" = None, *, rows: int | None = None) -> str:
+    def ddl(self, annotate: Callable[[str, str], str] | None = None, *, rows: int | None = None) -> str:
         """Compact CREATE-TABLE-ish rendering used in prompts.
 
         `annotate(table, column)` supplies observed values and ranges from a
@@ -125,7 +125,7 @@ class SchemaSnapshot:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "SchemaSnapshot":
+    def from_dict(cls, data: dict) -> SchemaSnapshot:
         snap = cls(dialect=data["dialect"])
         for name, t in data["tables"].items():
             snap.tables[name] = TableInfo(
@@ -269,7 +269,9 @@ def _introspect_generic(db: Database, schema: str | None) -> SchemaSnapshot:
         for fk in fk_defs:
             target = fk.get("referred_table")
             for src, tgt in zip(
-                fk.get("constrained_columns") or [], fk.get("referred_columns") or []
+                fk.get("constrained_columns") or [],
+                fk.get("referred_columns") or [],
+                strict=False,
             ):
                 snap.foreign_keys.append(
                     ForeignKey(src_table=name, src_column=src, tgt_table=target, tgt_column=tgt)

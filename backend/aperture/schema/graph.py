@@ -23,7 +23,7 @@ class SchemaGraph:
     snapshot: SchemaSnapshot
 
     @classmethod
-    def build(cls, snapshot: SchemaSnapshot, profile: DatabaseProfile | None = None) -> "SchemaGraph":
+    def build(cls, snapshot: SchemaSnapshot, profile: DatabaseProfile | None = None) -> SchemaGraph:
         """Build the table graph.
 
         Row counts come from the profile when available: `pg_class.reltuples`

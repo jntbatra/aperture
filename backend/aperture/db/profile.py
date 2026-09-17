@@ -19,7 +19,6 @@ from functools import lru_cache
 from sqlalchemy import text
 
 from ..config import settings
-
 from .connection import Database
 from .introspect import SchemaSnapshot
 
@@ -112,7 +111,7 @@ class DatabaseProfile:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "DatabaseProfile":
+    def from_dict(cls, data: dict) -> DatabaseProfile:
         profile = cls()
         for name, t in data["tables"].items():
             tp = TableProfile(table=t["table"], exact_rows=t["exact_rows"])
@@ -171,7 +170,6 @@ def profile_database(
     """Profile up to `max_tables` tables, largest first."""
     profile = DatabaseProfile()
     ordered = sorted(snapshot.tables.values(), key=lambda t: -t.approx_rows)[:max_tables]
-    names = [t.name for t in ordered]
 
     if db.dialect == "postgresql":
         with db.engine.connect() as conn:

@@ -12,7 +12,7 @@ import json
 import os
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import settings
@@ -44,7 +44,7 @@ class Ledger:
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @classmethod
-    def default(cls) -> "Ledger":
+    def default(cls) -> Ledger:
         home = Path(os.path.expanduser(settings().home_dir))
         home.mkdir(parents=True, exist_ok=True)
         ledger = cls(path=home / "usage.jsonl")
@@ -85,7 +85,7 @@ class Ledger:
             self.total.calls += 1
             spent = self.total.cost_usd(cfg.price_in_per_mtok, cfg.price_out_per_mtok)
             row = {
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "label": label,
                 "model_id": model_id,
                 "input_tokens": input_tokens,

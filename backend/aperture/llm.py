@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from botocore.config import Config as BotoConfig
 from langchain_aws import ChatBedrockConverse

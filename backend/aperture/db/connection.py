@@ -117,7 +117,7 @@ class QueryResult:
         return len(self.rows)
 
     def to_records(self) -> list[dict[str, Any]]:
-        return [dict(zip(self.columns, row)) for row in self.rows]
+        return [dict(zip(self.columns, row, strict=False)) for row in self.rows]
 
 
 @dataclass
@@ -137,7 +137,7 @@ class Database:
         self.engine = create_engine(self.url, pool_pre_ping=True, future=True)
 
     @classmethod
-    def from_settings(cls) -> "Database":
+    def from_settings(cls) -> Database:
         return cls(settings().database_url)
 
     @property

@@ -14,7 +14,7 @@ from mcp.server.mcpserver import MCPServer
 
 from .charts import jsonable
 from .config import settings
-from .db import Database, load_schema
+from .db import Database
 from .graph import build_analyst, sync_checkpointer
 from .guards.validator import validate_sql
 from .schema import SchemaLinker
