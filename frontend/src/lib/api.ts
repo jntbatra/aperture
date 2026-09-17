@@ -9,6 +9,7 @@ export interface FinalPayload {
   chart_spec?: Record<string, unknown> | null
   assumptions?: string
   verification?: { kind: string; message: string }[]
+  suggestions?: { text: string; reason: string }[]
   status?: string
   attempts?: number
   identifier_fixes?: string[]

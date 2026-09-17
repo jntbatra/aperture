@@ -11,18 +11,20 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from ..budget import BudgetExceeded
+from ..budget import LEDGER, BudgetExceeded
 from ..charts import build_spec
 from ..config import settings
 from ..db import Database, SchemaBundle, load_schema
 from ..db.connection import QueryFailed
 from ..extract import NoSQLFound, extract_sql
+from ..followups import suggest
 from ..guards.cost import estimate_cost
 from ..guards.validator import validate_sql
 from ..llm import build_llm, invoke_metered, stop_reason, usage_of
 from ..schema import SchemaLinker
 from ..semantic import SemanticLayer
 from ..sqlfix import repair_identifiers
+from ..telemetry import record_run
 from ..verify import verify as verify_query
 from .empty import diagnose_empty
 from .prompts import generate_prompt, narrate_prompt, repair_prompt
@@ -74,6 +76,14 @@ def _note(state: AnalystState, node: str, **fields) -> list[dict]:
 
 def make_nodes(ctx: AnalystContext) -> dict:
     cfg = settings()
+
+    def _persist(state: AnalystState) -> None:
+        record_run(
+            dict(state),
+            dataset=ctx.db.fingerprint,
+            dialect=ctx.db.dialect,
+            cost_usd=LEDGER.spent_usd(),
+        )
 
     def route(state: AnalystState) -> AnalystState:
         question = (state.get("question") or "").strip()
@@ -134,7 +144,9 @@ def make_nodes(ctx: AnalystContext) -> dict:
             )
         else:
             answer = "Ask me a question about the data and I'll write the SQL for it."
-        return {"answer": answer, "status": "answered", "trace": _note(state, "small_talk")}
+        update = {"answer": answer, "status": "answered", "trace": _note(state, "small_talk")}
+        _persist({**state, **update})
+        return update
 
     def link_schema(state: AnalystState) -> AnalystState:
         matched = ctx.semantic.match(state["question"])
@@ -162,8 +174,13 @@ def make_nodes(ctx: AnalystContext) -> dict:
 
     def generate_sql(state: AnalystState) -> AnalystState:
         if _over_deadline(state):
-            return {"status": "timed_out", "answer": "Timed out before producing an answer.",
-                    "trace": _note(state, "generate_sql", skipped="deadline")}
+            update: AnalystState = {
+                "status": "timed_out",
+                "answer": "Timed out before producing an answer.",
+                "trace": _note(state, "generate_sql", skipped="deadline"),
+            }
+            _persist({**state, **update})
+            return update
 
         attempts = state.get("attempts", 0)
         repeated = state.get("repair_note", "").startswith("IDENTICAL")
@@ -189,8 +206,13 @@ def make_nodes(ctx: AnalystContext) -> dict:
         try:
             response = invoke_metered(llm, messages, label=label)
         except BudgetExceeded as err:
-            return {"status": "over_budget", "answer": f"Stopped: {err}",
-                    "trace": _note(state, "generate_sql", error="budget")}
+            update = {
+                "status": "over_budget",
+                "answer": f"Stopped: {err}",
+                "trace": _note(state, "generate_sql", error="budget"),
+            }
+            _persist({**state, **update})
+            return update
 
         text = response.content if isinstance(response.content, str) else str(response.content)
         tokens_in, tokens_out = usage_of(response)
@@ -253,7 +275,7 @@ def make_nodes(ctx: AnalystContext) -> dict:
             }
 
         if result.kind in {"write", "banned_function", "locking"}:
-            return {
+            update: AnalystState = {
                 "status": "refused",
                 "answer": (
                     f"Refused: {result.reason}. Aperture connects with a read-only "
@@ -261,6 +283,8 @@ def make_nodes(ctx: AnalystContext) -> dict:
                 ),
                 "trace": trace,
             }
+            _persist({**state, **update})
+            return update
 
         return {
             "last_error": result.reason,
@@ -297,8 +321,13 @@ def make_nodes(ctx: AnalystContext) -> dict:
 
     def execute(state: AnalystState) -> AnalystState:
         if _over_deadline(state):
-            return {"status": "timed_out", "answer": "Timed out before the query finished.",
-                    "trace": _note(state, "execute", skipped="deadline")}
+            update: AnalystState = {
+                "status": "timed_out",
+                "answer": "Timed out before the query finished.",
+                "trace": _note(state, "execute", skipped="deadline"),
+            }
+            _persist({**state, **update})
+            return update
         try:
             result = ctx.db.run(state["sql"])
         except QueryFailed as err:
@@ -451,16 +480,31 @@ def make_nodes(ctx: AnalystContext) -> dict:
     def chart(state: AnalystState) -> AnalystState:
         rows = state.get("rows") or []
         columns = state.get("columns") or []
-        if not rows or not columns:
-            return {"chart_spec": None, "trace": _note(state, "chart", spec=False)}
-        spec = build_spec(columns, rows, title=state.get("question", "")[:80])
-        return {
+        spec = (
+            build_spec(columns, rows, title=state.get("question", "")[:80])
+            if rows and columns
+            else None
+        )
+        suggestions = suggest(
+            question=state.get("question", ""),
+            columns=columns,
+            rows=rows,
+            linked_tables=state.get("linked_tables", []),
+            snapshot=ctx.bundle.snapshot,
+            profile=ctx.bundle.profile,
+            status=state.get("status", "answered"),
+            has_caveat=bool(state.get("verification")),
+        )
+        update = {
             "chart_spec": spec,
+            "suggestions": [{"text": s.text, "reason": s.reason} for s in suggestions],
             "trace": _note(state, "chart", spec=bool(spec)),
         }
+        _persist({**state, **update})
+        return update
 
     def exhausted(state: AnalystState) -> AnalystState:
-        return {
+        update: AnalystState = {
             "status": "exhausted",
             "answer": (
                 "I could not produce a working query after "
@@ -468,6 +512,8 @@ def make_nodes(ctx: AnalystContext) -> dict:
             ),
             "trace": _note(state, "exhausted"),
         }
+        _persist({**state, **update})
+        return update
 
     return {
         "route": route,

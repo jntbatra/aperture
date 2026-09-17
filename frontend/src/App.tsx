@@ -165,6 +165,23 @@ export default function App() {
               <p className="text-xs text-(--color-muted)">assumptions: {turn.final.assumptions}</p>
             )}
 
+            {turn.final?.suggestions && turn.final.suggestions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-xs text-(--color-muted)">next:</span>
+                {turn.final.suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.text}
+                    title={suggestion.reason}
+                    onClick={() => submit(suggestion.text)}
+                    disabled={busy}
+                    className="rounded-full border border-(--color-edge) bg-(--color-panel) px-3 py-1 text-xs text-slate-300 transition hover:border-(--color-accent)/50 hover:text-white disabled:opacity-40"
+                  >
+                    {suggestion.text}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {turn.final?.usage && <p className="text-xs text-(--color-muted)">{turn.final.usage}</p>}
           </article>
         ))}

@@ -20,8 +20,8 @@ from rich.table import Table
 from .budget import LEDGER
 from .config import settings
 from .db import Database, load_schema
-from .ingest import active_database_url, datasets_dir, forget_dataset, load_csv, remember_dataset
 from .graph import build_analyst, sync_checkpointer
+from .ingest import active_database_url, datasets_dir, forget_dataset, load_csv, remember_dataset
 from .schema import SchemaLinker
 
 app = typer.Typer(add_completion=False, help="Ask a SQL database questions in plain English.")
@@ -141,8 +141,13 @@ def ask(
                 json.dump(spec, fh, indent=2)
             console.print(f"[dim]chart spec written to {spec_out}[/dim]")
 
+    if final.get("suggestions"):
+        console.print("\n[dim]next:[/dim]")
+        for suggestion in final["suggestions"]:
+            console.print(f"  [cyan]·[/cyan] {suggestion['text']} [dim]({suggestion['reason']})[/dim]")
+
     console.print(
-        f"[dim]{time.perf_counter() - started:.1f}s · {LEDGER.summary()}[/dim]"
+        f"\n[dim]{time.perf_counter() - started:.1f}s · {LEDGER.summary()}[/dim]"
     )
 
 
@@ -252,6 +257,37 @@ def link(question: str = typer.Argument(..., help="Question to link against the 
     if linked.empty_tables:
         console.print(f"[yellow]empty[/yellow]: {', '.join(linked.empty_tables)}")
     console.print(f"[dim]schema section: {len(linked.as_prompt_section()):,} chars[/dim]")
+
+
+@app.command()
+def stats(limit: int = typer.Option(500, "--limit", help="How many recent runs to summarise.")) -> None:
+    """Operational metrics from recorded runs."""
+    from .telemetry import summarise, telemetry_path
+
+    data = summarise(limit)
+    if not data.runs:
+        console.print("[dim]no runs recorded yet[/dim]")
+        return
+
+    table = Table(box=None, title=f"last {data.runs} runs")
+    table.add_column("metric")
+    table.add_column("value", justify="right")
+    table.add_row("median latency", f"{data.median_ms / 1000:.1f}s")
+    table.add_row("p95 latency", f"{data.p95_ms / 1000:.1f}s")
+    table.add_row("needed a repair", f"{data.repair_rate:.0%}")
+    table.add_row("identifiers auto-fixed", f"{data.identifier_repair_rate:.0%}")
+    table.add_row("answers with a caveat", f"{data.caveat_rate:.0%}")
+    table.add_row("empty results", f"{data.empty_rate:.0%}")
+    table.add_row("tokens", f"{data.tokens:,}")
+    console.print(table)
+
+    statuses = Table(box=None)
+    statuses.add_column("status")
+    statuses.add_column("runs", justify="right")
+    for status, count in sorted(data.by_status.items(), key=lambda pair: -pair[1]):
+        statuses.add_row(status, str(count))
+    console.print(statuses)
+    console.print(f"[dim]{telemetry_path()}[/dim]")
 
 
 @app.command()

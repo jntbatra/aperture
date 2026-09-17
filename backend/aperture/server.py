@@ -103,6 +103,7 @@ async def ask(request: AskRequest):
                     "chart_spec": final.get("chart_spec"),
                     "assumptions": final.get("assumptions"),
                     "verification": final.get("verification", []),
+                    "suggestions": final.get("suggestions", []),
                     "status": final.get("status"),
                     "attempts": final.get("attempts", 0),
                     "identifier_fixes": final.get("identifier_fixes", []),
