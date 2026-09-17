@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # schema linking
     link_top_k_tables: int = 8
     link_hops: int = 1
-    link_table_budget: int = 25
+    link_table_budget: int = 12
 
     # Columns whose observed values must never reach a prompt, a trace, or a
     # rendered table. Matched case-insensitively against the column name.
