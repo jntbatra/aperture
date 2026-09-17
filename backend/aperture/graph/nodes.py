@@ -115,7 +115,9 @@ def make_nodes(ctx: AnalystContext) -> dict:
         return {"answer": answer, "status": "answered", "trace": _note(state, "small_talk")}
 
     def link_schema(state: AnalystState) -> AnalystState:
-        linked = ctx.linker.link(state["question"])
+        matched = ctx.semantic.match(state["question"])
+        metric_tables = [table for metric in matched for table in metric.tables]
+        linked = ctx.linker.link(state["question"], extra_seeds=metric_tables)
         section = linked.as_prompt_section()
         # Business definitions go last so they are the final word before the
         # question, and only the ones this question touches are included.

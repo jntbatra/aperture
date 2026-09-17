@@ -149,14 +149,27 @@ class SchemaLinker:
                         tables.append(table_name)
         return hints[:12], list(dict.fromkeys(tables))
 
-    def link(self, question: str, *, top_k: int | None = None) -> LinkedSchema:
+    def link(
+        self,
+        question: str,
+        *,
+        top_k: int | None = None,
+        extra_seeds: list[str] | None = None,
+    ) -> LinkedSchema:
+        """Retrieve the subschema for `question`.
+
+        `extra_seeds` carries tables named by a matched metric definition.
+        Those are authoritative -- "revenue" names no table, so lexical scoring
+        alone drifts to whatever shares a word with the question.
+        """
         cfg = settings()
         top_k = top_k or cfg.link_top_k_tables
 
         scored = self.score_tables(question)
         value_hints, value_tables = self.match_values(question)
 
-        seeds = list(dict.fromkeys(value_tables + [name for name, _ in scored[:top_k]]))
+        known = [t for t in (extra_seeds or []) if t in self.snapshot.tables]
+        seeds = list(dict.fromkeys(known + value_tables + [name for name, _ in scored[:top_k]]))
         if not seeds:
             # Nothing matched: fall back to the busiest tables, which is where
             # an unguided question about "the data" almost always points.
