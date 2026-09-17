@@ -17,7 +17,10 @@ from ..config import settings
 from .nodes import AnalystContext, make_nodes
 from .state import AnalystState
 
-TERMINAL_STATUSES = {"refused", "over_budget", "timed_out", "answered"}
+# Statuses that end a run. "answered" is deliberately absent: it is set by the
+# final nodes, and treating it as a stop condition mid-run lets a previous
+# turn's status terminate the current one.
+TERMINAL_STATUSES = {"refused", "over_budget", "timed_out"}
 
 
 def checkpoint_path() -> Path:

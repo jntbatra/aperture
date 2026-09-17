@@ -82,14 +82,36 @@ def make_nodes(ctx: AnalystContext) -> dict:
             intent = "schema_question"
         else:
             intent = "query"
+        # Every field the previous turn wrote must be cleared here. The
+        # checkpointer restores the whole thread state, so a leftover terminal
+        # status from the last question ends this one the moment it starts --
+        # the query is generated, then skipped straight to the end unexecuted.
         return {
             "intent": intent,
-            "started_at": state.get("started_at") or time.time(),
+            "started_at": time.time(),
             "attempts": 0,
             "empty_retries": 0,
             "seen_sql_hashes": [],
             "seen_error_keys": [],
-            "trace": _note(state, "route", intent=intent),
+            "status": "pending",
+            "sql": "",
+            "raw_response": "",
+            "answer": "",
+            "assumptions": "",
+            "diagnosis": "",
+            "last_error": "",
+            "last_error_kind": "",
+            "repair_note": "",
+            "identifier_fixes": [],
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "truncated": False,
+            "elapsed_ms": 0.0,
+            "estimated_cost": None,
+            "chart_spec": None,
+            "tokens_used": 0,
+            "trace": [{"node": "route", "at": round(time.time(), 3), "intent": intent}],
         }
 
     def small_talk(state: AnalystState) -> AnalystState:
