@@ -124,7 +124,8 @@ def build_analyst(ctx: AnalystContext | None = None, *, checkpointer=None):
     builder.add_conditional_edges(
         "diagnose_empty", _after_diagnose_empty, ["generate_sql", "narrate"]
     )
-    builder.add_edge("narrate", END)
+    builder.add_edge("narrate", "chart")
+    builder.add_edge("chart", END)
     builder.add_edge("exhausted", END)
 
     return builder.compile(checkpointer=checkpointer), ctx

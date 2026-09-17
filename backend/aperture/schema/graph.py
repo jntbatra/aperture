@@ -106,7 +106,9 @@ class SchemaGraph:
         ]
         return sorted(set(hints))
 
-    def fan_out_warnings(self, tables: list[str], *, ratio_threshold: float = 2.0) -> list[str]:
+    def fan_out_warnings(
+        self, tables: list[str], *, ratio_threshold: float = 2.0, parent_min_rows: int = 100
+    ) -> list[str]:
         """Flag child tables far larger than their parent.
 
         A legal join through such a table multiplies parent rows, so any SUM
@@ -120,7 +122,9 @@ class SchemaGraph:
                 continue
             src_rows = self.graph.nodes[src].get("rows", 0)
             tgt_rows = self.graph.nodes[tgt].get("rows", 0)
-            if tgt_rows and src_rows > tgt_rows * ratio_threshold:
+            # A one-row lookup table is not a fan-out risk, it is a lookup
+            # table; warning about it drowns the warning that matters.
+            if tgt_rows >= parent_min_rows and src_rows > tgt_rows * ratio_threshold:
                 warnings.append(
                     f"{src} holds ~{src_rows / max(tgt_rows, 1):.1f}x the rows of {tgt}; "
                     f"joining them multiplies {tgt} rows -- aggregate {src} in a subquery "

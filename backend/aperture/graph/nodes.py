@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass, field
 
 from ..budget import LEDGER, BudgetExceeded
+from ..charts import build_spec
 from ..config import settings
 from ..db import Database, SchemaBundle, load_schema
 from ..db.connection import QueryFailed
@@ -389,6 +390,17 @@ def make_nodes(ctx: AnalystContext) -> dict:
             "trace": _note(state, "narrate", rows=row_count),
         }
 
+    def chart(state: AnalystState) -> AnalystState:
+        rows = state.get("rows") or []
+        columns = state.get("columns") or []
+        if not rows or not columns:
+            return {"chart_spec": None, "trace": _note(state, "chart", spec=False)}
+        spec = build_spec(columns, rows, title=state.get("question", "")[:80])
+        return {
+            "chart_spec": spec,
+            "trace": _note(state, "chart", spec=bool(spec)),
+        }
+
     def exhausted(state: AnalystState) -> AnalystState:
         return {
             "status": "exhausted",
@@ -410,5 +422,6 @@ def make_nodes(ctx: AnalystContext) -> dict:
         "diagnose": diagnose,
         "diagnose_empty": diagnose_empty_node,
         "narrate": narrate,
+        "chart": chart,
         "exhausted": exhausted,
     }
