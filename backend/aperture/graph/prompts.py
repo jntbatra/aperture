@@ -65,17 +65,31 @@ def repair_prompt(
 
 
 NARRATE_SYSTEM = """You summarise query results for a business user. Two or \
-three sentences, specific, no preamble. Quote the actual numbers. If the result \
-is empty or surprising, say so plainly rather than inventing an explanation."""
+three sentences, specific, no preamble. Quote the actual numbers exactly as \
+returned. Never guess a currency symbol: if a column holds money and the unit \
+is not stated, write the bare number. If the result is empty or surprising, say \
+so plainly rather than inventing an explanation."""
 
 
-def narrate_prompt(question: str, sql: str, columns: list[str], rows: list, row_count: int):
+def narrate_prompt(
+    question: str,
+    sql: str,
+    columns: list[str],
+    rows: list,
+    row_count: int,
+    conventions: list[str] | None = None,
+):
     preview = "\n".join(str(tuple(r)) for r in rows[:15])
+    # Conventions carry the unit and currency. Without them the summary invents
+    # a currency symbol, which is a small error that reads as a large one.
+    rules = ""
+    if conventions:
+        rules = "REPORTING RULES\n" + "\n".join(f"  - {c}" for c in conventions) + "\n\n"
     return [
         ("system", NARRATE_SYSTEM),
         (
             "human",
-            f"QUESTION: {question}\n\nSQL:\n{sql}\n\n"
+            f"{rules}QUESTION: {question}\n\nSQL:\n{sql}\n\n"
             f"COLUMNS: {columns}\nROWS RETURNED: {row_count}\n"
             f"FIRST ROWS:\n{preview}",
         ),

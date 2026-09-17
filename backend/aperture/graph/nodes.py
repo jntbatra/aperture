@@ -21,6 +21,7 @@ from ..guards.cost import estimate_cost
 from ..guards.validator import validate_sql
 from ..llm import build_llm, invoke_metered, stop_reason, usage_of
 from ..schema import SchemaLinker
+from ..semantic import SemanticLayer
 from ..sqlfix import repair_identifiers
 from .empty import diagnose_empty
 from .prompts import generate_prompt, narrate_prompt, repair_prompt
@@ -43,6 +44,7 @@ class AnalystContext:
     db: Database
     bundle: SchemaBundle
     linker: SchemaLinker
+    semantic: SemanticLayer = field(default_factory=SemanticLayer.default)
     trace_sink: list = field(default_factory=list)
 
     @classmethod
@@ -114,12 +116,24 @@ def make_nodes(ctx: AnalystContext) -> dict:
 
     def link_schema(state: AnalystState) -> AnalystState:
         linked = ctx.linker.link(state["question"])
+        section = linked.as_prompt_section()
+        # Business definitions go last so they are the final word before the
+        # question, and only the ones this question touches are included.
+        metrics = ctx.semantic.prompt_section(state["question"])
+        if metrics:
+            section = f"{section}\n\n{metrics}"
         return {
             "linked_tables": linked.tables,
-            "schema_section": linked.as_prompt_section(),
+            "schema_section": section,
             "value_hints": linked.value_hints,
             "empty_tables": linked.empty_tables,
-            "trace": _note(state, "link_schema", tables=len(linked.tables), seeds=linked.seeds[:5]),
+            "trace": _note(
+                state,
+                "link_schema",
+                tables=len(linked.tables),
+                seeds=linked.seeds[:5],
+                metrics=[m.name for m in ctx.semantic.match(state["question"])],
+            ),
         }
 
     def generate_sql(state: AnalystState) -> AnalystState:
@@ -371,7 +385,14 @@ def make_nodes(ctx: AnalystContext) -> dict:
         try:
             response = invoke_metered(
                 build_llm(max_tokens=400),
-                narrate_prompt(state["question"], state.get("sql", ""), columns, rows, row_count),
+                narrate_prompt(
+                    state["question"],
+                    state.get("sql", ""),
+                    columns,
+                    rows,
+                    row_count,
+                    conventions=ctx.semantic.conventions,
+                ),
                 label="narrate",
             )
         except BudgetExceeded as err:

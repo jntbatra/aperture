@@ -1,0 +1,69 @@
+# Metric definitions for the tiffinwala demo database.
+#
+# These encode decisions the schema cannot make: which status counts as a sale,
+# whether cancelled orders are revenue, what unit money is stored in. Without
+# them a model picks a different answer each time it is asked.
+
+conventions:
+  - All money columns are stored in paise (1 rupee = 100 paise). Divide by 100.0 to report rupees.
+  - The currency is Indian rupees. Report money as Rs 1,234.00 or 1,234.00 INR, never dollars.
+  - Timestamps are naive local time. "Last month" means the previous calendar month.
+  - orders.status is an enum; the only values that occur are DELIVERED, CONFUSED_CUSTOMER,
+    CANCELLED, PREPARING, PICKED_UP and READY.
+  - CONFUSED_CUSTOMER marks an order the customer disputed. It is not a completed sale and is not
+    counted as revenue, but it is also not a cancellation.
+
+metrics:
+  revenue:
+    description: Money actually earned from completed orders.
+    expression: SUM(orders."totalAmount") / 100.0
+    filter: orders.status = 'DELIVERED'
+    synonyms: [revenue, sales, turnover, earnings, income, gmv]
+    tables: [orders]
+    notes: Delivered orders only. Cancelled and disputed orders are excluded.
+
+  delivered_order:
+    description: An order that reached the customer.
+    filter: orders.status = 'DELIVERED'
+    synonyms: [delivered, completed, fulfilled, successful]
+    tables: [orders]
+
+  average_order_value:
+    description: Mean value of a completed order, in rupees.
+    expression: AVG(orders."totalAmount") / 100.0
+    filter: orders.status = 'DELIVERED'
+    synonyms: [aov, average order value, basket size, average spend]
+    tables: [orders]
+
+  cancellation_rate:
+    description: Share of orders that were cancelled.
+    expression: COUNT(*) FILTER (WHERE orders.status = 'CANCELLED')::numeric / NULLIF(COUNT(*), 0)
+    synonyms: [cancellation, cancelled, cancel rate, churn]
+    tables: [orders]
+    notes: Denominator is all orders in the period, not just delivered ones.
+
+  active_customer:
+    description: A customer who placed at least one order in the period.
+    expression: COUNT(DISTINCT orders."userId")
+    synonyms: [active customer, active user, buyer, customers ordering]
+    tables: [orders, users]
+    notes: Counted from orders, not from the users table, which includes riders and admins.
+
+  orders_per_day:
+    description: Daily order volume.
+    expression: COUNT(*) GROUP BY DATE_TRUNC('day', orders."createdAt")
+    synonyms: [orders per day, daily orders, volume, throughput]
+    tables: [orders]
+
+  coupon_redemption:
+    description: Discount given through coupons, in rupees.
+    expression: SUM(coupon_usages."discountAmountPaise") / 100.0
+    synonyms: [coupon, discount, promo, redemption, voucher]
+    tables: [coupon_usages, coupons]
+
+  rider_payout:
+    description: Net amount settled to riders, in rupees.
+    expression: SUM(rider_settlements."netPaise") / 100.0
+    synonyms: [rider payout, rider payment, settlement, rider earnings, payout]
+    tables: [rider_settlements]
+    notes: netPaise is earnings minus cash held; use earningsPaise for gross earnings.
