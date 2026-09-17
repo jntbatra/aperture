@@ -207,6 +207,11 @@ Query results flow to the configured model provider, and to LangSmith if tracing
 matching `APERTURE_PII_COLUMN_PATTERN` have their observed values withheld from prompts, but returned
 rows are not redacted. Point Aperture at data you are permitted to send.
 
+## Documentation
+
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how it works, why, measured results and limits.
+[docs/DEMO.md](docs/DEMO.md) — a rehearsed walkthrough.
+
 ## Licence
 
 MIT.
