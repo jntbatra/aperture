@@ -29,3 +29,8 @@ cache/
 
 # os
 .DS_Store
+
+# personal study notes and screenshots of a client database
+docs/screenshot*.png
+docs/study-guide.html
+docs/aperture-study-guide.pdf

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     # database under analysis; should point at a read-only role
-    database_url: str = "postgresql+psycopg://aperture_ro:aperture_ro_pw@localhost:5433/tiffinwala"
+    database_url: str = "sqlite:///aperture.db"
     # Owner connection. Left unset on purpose: an owner credential sitting next
     # to an LLM loop is a liability, and writes are refused rather than escalated.
     owner_database_url: str | None = None

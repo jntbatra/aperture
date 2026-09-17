@@ -1,6 +1,6 @@
 # Demo script
 
-Questions rehearsed against the tiffinwala database. Run them in this order; each one shows
+Questions rehearsed against the demo database. Run them in this order; each one shows
 something the previous did not.
 
 ## Before you start
@@ -44,7 +44,7 @@ the schema. Before this existed, this exact question exhausted both attempts and
 Refused by the validator. Then show the layer underneath, which does not depend on any prompt:
 
 ```bash
-PGPASSWORD=... psql -h localhost -p 5433 -U aperture_ro tiffinwala \
+PGPASSWORD=$PASSWORD psql -h $HOST -U aperture_ro $YOUR_DATABASE \
   -c "delete from orders where 1=0"
 # ERROR: cannot execute DELETE in a read-only transaction
 ```
