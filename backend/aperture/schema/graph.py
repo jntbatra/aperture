@@ -117,17 +117,23 @@ class SchemaGraph:
         """
         chosen = set(tables)
         warnings = []
-        for src, tgt, _ in self.graph.edges(data=True):
-            if src not in chosen or tgt not in chosen:
+        for left, right, _ in self.graph.edges(data=True):
+            if left not in chosen or right not in chosen:
                 continue
-            src_rows = self.graph.nodes[src].get("rows", 0)
-            tgt_rows = self.graph.nodes[tgt].get("rows", 0)
+            # The graph is undirected and edge orientation is an accident of
+            # insertion order, so compare by size rather than by position.
+            pair = sorted(
+                (left, right), key=lambda name: self.graph.nodes[name].get("rows", 0)
+            )
+            parent, child = pair[0], pair[1]
+            parent_rows = self.graph.nodes[parent].get("rows", 0)
+            child_rows = self.graph.nodes[child].get("rows", 0)
             # A one-row lookup table is not a fan-out risk, it is a lookup
             # table; warning about it drowns the warning that matters.
-            if tgt_rows >= parent_min_rows and src_rows > tgt_rows * ratio_threshold:
+            if parent_rows >= parent_min_rows and child_rows > parent_rows * ratio_threshold:
                 warnings.append(
-                    f"{src} holds ~{src_rows / max(tgt_rows, 1):.1f}x the rows of {tgt}; "
-                    f"joining them multiplies {tgt} rows -- aggregate {src} in a subquery "
-                    f"before joining, or use COUNT(DISTINCT ...)"
+                    f"{child} holds ~{child_rows / max(parent_rows, 1):.1f}x the rows of "
+                    f"{parent}; joining them multiplies {parent} rows -- aggregate {child} "
+                    f"in a subquery before joining, or use COUNT(DISTINCT ...)"
                 )
         return sorted(set(warnings))
