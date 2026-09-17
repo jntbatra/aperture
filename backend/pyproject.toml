@@ -44,6 +44,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["aperture"]
 
+# The bundled sample dataset ships with the package so `aperture demo` works
+# from a clean install.
+[tool.hatch.build.targets.wheel.force-include]
+"aperture/data" = "aperture/data"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

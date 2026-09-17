@@ -238,28 +238,24 @@ def load_csv(
     )
 
 
-def dataset_pointer() -> Path:
-    return Path(os.path.expanduser(settings().home_dir)) / "current_dataset"
+def register_dataset(result: IngestResult, *, name: str, source: str) -> None:
+    """Record a loaded CSV as a named connection and make it active."""
+    from .registry import Connection, Registry
 
-
-def remember_dataset(url: str) -> None:
-    """Record the active dataset so later commands need no arguments."""
-    pointer = dataset_pointer()
-    pointer.parent.mkdir(parents=True, exist_ok=True)
-    pointer.write_text(url)
+    registry = Registry.load()
+    registry.add(
+        Connection(
+            name=name,
+            url=result.database_url,
+            kind="csv",
+            source=source,
+            table=result.table,
+        )
+    )
 
 
 def active_database_url() -> str:
-    """The dataset selected by `aperture load`, else the configured database."""
-    pointer = dataset_pointer()
-    if pointer.exists():
-        url = pointer.read_text().strip()
-        if url:
-            return url
-    return settings().database_url
+    """URL of the active connection, else the configured database."""
+    from .registry import active_url
 
-
-def forget_dataset() -> None:
-    pointer = dataset_pointer()
-    if pointer.exists():
-        pointer.unlink()
+    return active_url()

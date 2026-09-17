@@ -10,9 +10,11 @@ from __future__ import annotations
 import json
 import logging
 import time
+from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.json import JSON
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
@@ -21,11 +23,33 @@ from .budget import LEDGER
 from .config import settings
 from .db import Database, load_schema
 from .graph import build_analyst, sync_checkpointer
-from .ingest import active_database_url, datasets_dir, forget_dataset, load_csv, remember_dataset
+from .ingest import load_csv, register_dataset
+from .registry import Connection, Registry
 from .schema import SchemaLinker
 
-app = typer.Typer(add_completion=False, help="Ask a SQL database questions in plain English.")
+app = typer.Typer(
+    add_completion=False,
+    help="Aperture — ask a SQL database questions in plain English.",
+    no_args_is_help=True,
+)
 console = Console()
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        from . import __version__
+
+        console.print(f"aperture {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False, "--version", "-V", callback=_version_callback, is_eager=True
+    ),
+) -> None:
+    """Ask a SQL database questions in plain English."""
 
 NODE_LABELS = {
     "route": "routing",
@@ -78,6 +102,7 @@ def ask(
     thread: str = typer.Option("cli", "--thread", "-t", help="Conversation thread id."),
     show_sql: bool = typer.Option(True, "--sql/--no-sql"),
     spec_out: str | None = typer.Option(None, "--spec-out", help="Write the chart spec here."),
+    csv_out: str | None = typer.Option(None, "--csv", help="Write the result rows to a CSV file."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Answer one question end to end."""
@@ -131,6 +156,15 @@ def ask(
     if final.get("assumptions"):
         console.print(f"[dim]assumptions: {final['assumptions']}[/dim]")
 
+    if csv_out and final.get("rows"):
+        import csv as _csv
+
+        with open(csv_out, "w", newline="") as handle:
+            writer = _csv.writer(handle)
+            writer.writerow(final.get("columns", []))
+            writer.writerows(final["rows"])
+        console.print(f"[dim]{len(final['rows'])} rows written to {csv_out}[/dim]")
+
     spec = final.get("chart_spec")
     if spec:
         mark = spec.get("mark")
@@ -164,7 +198,8 @@ def load(
     types, and every other command works against it unchanged.
     """
     result = load_csv(path, dataset=dataset, table=table, delimiter=delimiter)
-    remember_dataset(result.database_url)
+    name = dataset or Path(path).stem
+    register_dataset(result, name=name, source=str(Path(path).expanduser()))
 
     table_view = Table(title=result.summary(), box=None)
     table_view.add_column("column")
@@ -174,34 +209,67 @@ def load(
         renamed = "" if column.source == column.name else column.source
         table_view.add_row(column.name, column.sql_type, renamed)
     console.print(table_view)
-    console.print(f"\n[dim]stored at {result.path}[/dim]")
+    console.print(f"\n[dim]stored at {result.path} · connection '{name}' is now active[/dim]")
     console.print('[dim]now ask: aperture ask "what were total units by region?"[/dim]')
 
 
 @app.command()
-def datasets(
-    reset: bool = typer.Option(False, "--reset", help="Go back to the configured database."),
+def connect(
+    url: str = typer.Argument(..., help="SQLAlchemy URL, e.g. postgresql+psycopg://user:pw@host/db"),
+    name: str = typer.Option(..., "--name", "-n", help="Name to remember this connection by."),
 ) -> None:
-    """List loaded CSV datasets and show which one is active."""
-    if reset:
-        forget_dataset()
-        console.print(f"[dim]active database: {settings().database_url}[/dim]")
+    """Register a database connection and make it active."""
+    connection = Connection(name=name, url=url, kind="database")
+    database = Database(url)  # fails fast on an unsupported or malformed URL
+    bundle = load_schema(database, refresh=True)
+    Registry.load().add(connection)
+    console.print(
+        f"[green]connected[/green] {name} · {connection.dialect} · "
+        f"{len(bundle.snapshot.tables)} tables · {len(bundle.snapshot.foreign_keys)} foreign keys"
+    )
+    console.print('[dim]now ask: aperture ask "how many rows are there?"[/dim]')
+
+
+@app.command(name="connections")
+def list_connections() -> None:
+    """List every registered connection and show which is active."""
+    registry = Registry.load()
+    if not registry.connections:
+        console.print("[dim]nothing registered yet[/dim]")
+        console.print("[dim]  aperture load sales.csv          # a spreadsheet[/dim]")
+        console.print("[dim]  aperture connect <url> -n prod   # a database[/dim]")
         return
 
-    active = active_database_url()
-    listing = Table(box=None)
-    listing.add_column("")
-    listing.add_column("dataset")
-    listing.add_column("size", justify="right")
-    found = sorted(datasets_dir().glob("*.db"))
-    for path in found:
-        marker = "[green]•[/green]" if str(path) in active else " "
-        listing.add_row(marker, path.stem, f"{path.stat().st_size / 1024:.0f} KB")
-    if found:
-        console.print(listing)
+    table = Table(box=None)
+    table.add_column("")
+    table.add_column("name")
+    table.add_column("kind")
+    table.add_column("target", overflow="fold")
+    for name, connection in sorted(registry.connections.items()):
+        marker = "[green]•[/green]" if name == registry.active else " "
+        target = connection.source or connection.safe_url
+        table.add_row(marker, name, connection.kind, target)
+    console.print(table)
+
+
+@app.command()
+def use(name: str = typer.Argument(..., help="Connection to make active.")) -> None:
+    """Switch the active connection."""
+    connection = Registry.load().use(name)
+    if not connection:
+        console.print(f"[red]no connection named {name!r}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]active:[/green] {name} · {connection.safe_url}")
+
+
+@app.command()
+def forget(name: str = typer.Argument(..., help="Connection to remove.")) -> None:
+    """Remove a connection from the registry (data on disk is left alone)."""
+    if Registry.load().remove(name):
+        console.print(f"[dim]removed {name}[/dim]")
     else:
-        console.print("[dim]no CSV datasets loaded yet — try: aperture load data.csv[/dim]")
-    console.print(f"\n[dim]active: {active}[/dim]")
+        console.print(f"[red]no connection named {name!r}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -303,15 +371,115 @@ def serve(
     port: int = typer.Option(8000, "--port"),
     reload: bool = typer.Option(False, "--reload"),
 ) -> None:
-    """Run the HTTP API."""
+    """Run the web app: API, and the UI if it has been built."""
     import uvicorn
+
+    from .server import UI_MOUNTED, ui_directory
+
+    registry = Registry.load()
+    current = registry.current()
+    console.print(f"[bold]Aperture[/bold] · {current.name if current else settings().database_url}")
+    if UI_MOUNTED:
+        console.print(f"  app  http://{host}:{port}")
+    else:
+        console.print("[yellow]  UI not built[/yellow] — run: cd frontend && npm install && npm run build")
+        console.print(f"[dim]  (looked in {ui_directory()})[/dim]")
+    console.print(f"  api  http://{host}:{port}/docs\n")
 
     uvicorn.run("aperture.server:app", host=host, port=port, reload=reload)
 
 
 @app.command()
-def mcp() -> None:
-    """Run the MCP server on stdio."""
+def history(limit: int = typer.Option(15, "--limit", "-n")) -> None:
+    """Recent questions and how they went."""
+    from .telemetry import connect as telemetry_connect
+
+    connection = telemetry_connect()
+    rows = connection.execute(
+        "SELECT started_at, question, status, row_count, duration_ms, attempts"
+        " FROM runs ORDER BY started_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    connection.close()
+
+    if not rows:
+        console.print("[dim]no questions asked yet[/dim]")
+        return
+
+    table = Table(box=None)
+    table.add_column("when")
+    table.add_column("question", overflow="fold")
+    table.add_column("status")
+    table.add_column("rows", justify="right")
+    table.add_column("took", justify="right")
+    for started, question, status, row_count, duration, attempts in rows:
+        stamp = time.strftime("%H:%M", time.localtime(started))
+        label = status or "?"
+        if attempts:
+            label += f" ({attempts} repairs)"
+        table.add_row(stamp, question[:70], label, str(row_count), f"{duration / 1000:.1f}s")
+    console.print(table)
+
+
+@app.command()
+def demo() -> None:
+    """Load the bundled sample dataset and suggest questions to ask."""
+    sample = Path(__file__).parent / "data" / "sample_sales.csv"
+    if not sample.exists():
+        console.print("[red]bundled sample is missing[/red]")
+        raise typer.Exit(1)
+
+    result = load_csv(sample, dataset="demo_sales")
+    register_dataset(result, name="demo_sales", source=str(sample))
+    console.print(f"[green]loaded[/green] {result.summary()}\n")
+    console.print("Try:")
+    for question in (
+        "What was total revenue by region?",
+        "How did units sold change month by month?",
+        "Which product has the highest average order value?",
+        "What share of orders were refunded, by channel?",
+    ):
+        console.print(f'  [cyan]aperture ask[/cyan] "{question}"')
+
+
+@app.command()
+def mcp(
+    install: bool = typer.Option(False, "--install", help="Register with Claude Code."),
+    print_config: bool = typer.Option(False, "--print-config", help="Show the MCP config block."),
+) -> None:
+    """Run the MCP server on stdio, or register it with an agent.
+
+    Any MCP client then gets ask_database, run_sql and describe_schema against
+    the active connection, behind the same guardrails as the CLI.
+    """
+    import shutil
+    import subprocess
+
+    executable = shutil.which("aperture") or "aperture"
+    block = {"mcpServers": {"aperture": {"command": executable, "args": ["mcp"]}}}
+
+    if print_config:
+        console.print(JSON(json.dumps(block)))
+        return
+
+    if install:
+        claude = shutil.which("claude")
+        if not claude:
+            console.print("[yellow]claude CLI not found[/yellow] — add this to your MCP config:")
+            console.print(JSON(json.dumps(block)))
+            raise typer.Exit(1)
+        result = subprocess.run(
+            [claude, "mcp", "add", "aperture", "--", executable, "mcp"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            console.print("[green]registered[/green] aperture with Claude Code")
+        else:
+            console.print(f"[red]registration failed[/red]: {result.stderr.strip()[:200]}")
+            raise typer.Exit(result.returncode)
+        return
+
     from .mcp_server import main
 
     main()

@@ -73,6 +73,15 @@ remote-code-execution hole.
 **Spend is bounded by a ledger, not by attention.** Every model call records its tokens to a log
 that is replayed at startup, so a hard ceiling survives a crash and restart mid-run.
 
+**It checks its own answer with arithmetic.** After execution, two probes derived from the query's
+own AST re-run as counts: `COUNT(*)` against `COUNT(DISTINCT base primary key)` catches a join that
+multiplied rows and inflated a `SUM`, and a NULL-key count catches rows missing from a `GROUP BY`.
+A second opinion from a model can agree with the first mistake; counting cannot.
+
+> *total order value including every status change record*
+> **Rs 4,229,939.11.** Caveat: the joins multiply orders rows 5.6x (2,999 distinct orders produce
+> 16,812 joined rows), so any SUM over orders columns is inflated by roughly that factor.
+
 ## Why LangGraph
 
 Retry-until-valid is a cycle over mutable state. Validation, cost estimation and execution each
@@ -99,32 +108,54 @@ tracing and resume with it. The convergence guards are the interesting part:
 ## Quick start
 
 ```bash
-# 1. a read-only role for whatever database you are pointing at
+cd backend && uv venv --python 3.12 && uv pip install -e ".[dev]"
+
+aperture demo                                   # bundled sample data, no setup
+aperture ask "what was total revenue by region?"
+```
+
+No database required — a CSV becomes a real table with inferred types:
+
+```bash
+aperture load sales.csv                # types inferred: dates as dates, numbers as numbers
+aperture connect "postgresql+psycopg://user:pw@host/db" --name prod
+aperture connections                   # everything registered, and which is active
+aperture use prod
+```
+
+Point it at a real database through a read-only role — the first guardrail, and the
+one that does not depend on any prompt:
+
+```bash
 psql -c "CREATE ROLE aperture_ro LOGIN PASSWORD '...'"
 psql -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO aperture_ro"
 psql -c "ALTER ROLE aperture_ro SET default_transaction_read_only = on"
-
-# 2. install
-cd backend && uv venv --python 3.12 && uv pip install -e ".[dev]"
-cp .env.example .env    # set APERTURE_DATABASE_URL, AWS creds come from the usual chain
-
-# 3. ask
-aperture profile                       # what Aperture knows about your database
-aperture link "revenue by kitchen"     # which tables that question retrieves, and why
-aperture ask "how many orders were delivered last month?"
 ```
 
-Web UI:
+### The whole app in one command
 
 ```bash
-aperture serve                 # FastAPI on :8000
-cd frontend && npm install && npm run dev   # Vite on :5173
+cd frontend && npm install && npm run build
+aperture serve                 # UI and API together on http://127.0.0.1:8000
 ```
 
-As an MCP server, so any agent or IDE can query the database behind the same guardrails:
+### Every surface
 
-```json
-{ "mcpServers": { "aperture": { "command": "aperture", "args": ["mcp"] } } }
+| Surface | Command |
+|---|---|
+| CLI | `aperture ask "..."` — live node timeline, `--csv` to export rows |
+| Web app | `aperture serve` — streaming chat, charts, caveats, follow-up chips |
+| HTTP API | `POST /ask` (SSE), `/schema`, `/link`, `/connections`, `/usage` |
+| MCP | `aperture mcp --install` — `ask_database`, `run_sql`, `describe_schema` in any agent |
+
+### Knowing what it did
+
+```bash
+aperture profile      # tables, row counts, observed values, empty tables
+aperture link "..."   # which tables a question retrieves, and why
+aperture history      # recent questions, status, repairs, latency
+aperture stats        # repair rate, caveat rate, p95 latency
+aperture usage        # tokens and estimated spend against the ceiling
 ```
 
 ## Configuration

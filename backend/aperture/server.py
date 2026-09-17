@@ -10,10 +10,13 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -22,6 +25,7 @@ from .charts import jsonable
 from .config import settings
 from .graph import build_analyst
 from .graph.build import async_checkpointer
+from .registry import Registry
 from .schema import SchemaLinker
 
 log = logging.getLogger(__name__)
@@ -160,6 +164,54 @@ async def usage():
     }
 
 
+@app.get("/connections")
+async def connections():
+    registry = Registry.load()
+    return {
+        "active": registry.active,
+        "connections": [
+            {
+                "name": name,
+                "kind": connection.kind,
+                "dialect": connection.dialect,
+                "target": connection.source or connection.safe_url,
+            }
+            for name, connection in sorted(registry.connections.items())
+        ],
+    }
+
+
 @app.get("/health")
 async def health():
     return {"ok": True, "tables": len(STATE["ctx"].bundle.snapshot.tables)}
+
+
+def ui_directory() -> Path:
+    """The built frontend, if it has been compiled."""
+    return Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+
+def mount_ui(application: FastAPI) -> bool:
+    """Serve the built UI from the API, so one process runs the whole product."""
+    dist = ui_directory()
+    if not (dist / "index.html").exists():
+        return False
+
+    application.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+
+    @application.get("/", include_in_schema=False)
+    async def index():
+        return FileResponse(dist / "index.html")
+
+    @application.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str):
+        # Anything not matched by an API route is the single-page app.
+        candidate = dist / path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(dist / "index.html")
+
+    return True
+
+
+UI_MOUNTED = mount_ui(app)
