@@ -36,6 +36,7 @@ NODE_LABELS = {
     "execute": "executing",
     "diagnose": "diagnosing failure",
     "diagnose_empty": "explaining empty result",
+    "verify": "verifying result",
     "narrate": "summarising",
     "chart": "choosing chart",
     "exhausted": "giving up",
@@ -123,6 +124,9 @@ def ask(
 
     status = final.get("status", "unknown")
     console.print(Panel(final.get("answer", "(no answer)"), title=status, border_style=STATUS_STYLES.get(status, "white")))
+
+    for finding in final.get("verification", []):
+        console.print(f"[yellow]caveat[/yellow]: {finding['message']}")
 
     if final.get("assumptions"):
         console.print(f"[dim]assumptions: {final['assumptions']}[/dim]")

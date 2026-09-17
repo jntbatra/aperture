@@ -8,6 +8,7 @@ export interface FinalPayload {
   row_count?: number
   chart_spec?: Record<string, unknown> | null
   assumptions?: string
+  verification?: { kind: string; message: string }[]
   status?: string
   attempts?: number
   identifier_fixes?: string[]

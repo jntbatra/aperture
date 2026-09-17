@@ -7,6 +7,7 @@ const LABELS: Record<string, string> = {
   execute: 'executing',
   diagnose: 'diagnosing failure',
   diagnose_empty: 'explaining empty result',
+  verify: 'verifying result',
   narrate: 'summarising',
   chart: 'choosing chart',
   exhausted: 'giving up',
@@ -55,6 +56,14 @@ export function describeStep(node: string, update: Record<string, any>): Step {
   } else if (node === 'diagnose_empty') {
     detail = update.diagnosis ? 'cause found' : 'no obvious cause'
     tone = 'warn'
+  } else if (node === 'verify') {
+    const found = update.verification ?? []
+    if (found.length) {
+      detail = found.length === 1 ? '1 caveat' : `${found.length} caveats`
+      tone = 'warn'
+    } else {
+      detail = 'checks passed'
+    }
   } else if (node === 'exhausted') {
     tone = 'bad'
   }

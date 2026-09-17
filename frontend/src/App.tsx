@@ -152,6 +152,15 @@ export default function App() {
               </div>
             )}
 
+            {turn.final?.verification?.map((finding) => (
+              <div
+                key={finding.kind}
+                className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-100"
+              >
+                <span className="font-medium">Caveat</span> · {finding.message}
+              </div>
+            ))}
+
             {turn.final?.assumptions && (
               <p className="text-xs text-(--color-muted)">assumptions: {turn.final.assumptions}</p>
             )}

@@ -62,6 +62,8 @@ class AnalystState(TypedDict, total=False):
     # output
     diagnosis: str
     assumptions: str
+    # Deterministic post-execution checks: fan-out, dropped groups
+    verification: list[dict]
     answer: str
     chart_spec: dict | None
     status: Status

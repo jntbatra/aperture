@@ -23,6 +23,7 @@ from ..llm import build_llm, invoke_metered, stop_reason, usage_of
 from ..schema import SchemaLinker
 from ..semantic import SemanticLayer
 from ..sqlfix import repair_identifiers
+from ..verify import verify as verify_query
 from .empty import diagnose_empty
 from .prompts import generate_prompt, narrate_prompt, repair_prompt
 from .state import AnalystState
@@ -427,11 +428,24 @@ def make_nodes(ctx: AnalystContext) -> dict:
         # A count of zero is a correct answer and a confusing one; say why.
         if state.get("diagnosis"):
             answer = f"{answer}\n\n{state['diagnosis']}"
+        # Caveats are appended rather than used to rewrite the query: the SQL is
+        # on screen, and a warning the user can weigh beats a silent correction.
+        for finding in state.get("verification", []):
+            answer = f"{answer}\n\nCaveat: {finding['message']}"
         return {
             "answer": answer,
             "status": "answered",
             "tokens_used": state.get("tokens_used", 0) + sum(usage_of(response)),
             "trace": _note(state, "narrate", rows=row_count),
+        }
+
+    def verify_result(state: AnalystState) -> AnalystState:
+        findings = verify_query(
+            ctx.db, state.get("sql", ""), ctx.bundle.snapshot, dialect=ctx.dialect
+        )
+        return {
+            "verification": [{"kind": f.kind, "message": f.message} for f in findings],
+            "trace": _note(state, "verify", findings=[f.kind for f in findings]),
         }
 
     def chart(state: AnalystState) -> AnalystState:
@@ -465,6 +479,7 @@ def make_nodes(ctx: AnalystContext) -> dict:
         "execute": execute,
         "diagnose": diagnose,
         "diagnose_empty": diagnose_empty_node,
+        "verify": verify_result,
         "narrate": narrate,
         "chart": chart,
         "exhausted": exhausted,

@@ -102,6 +102,7 @@ async def ask(request: AskRequest):
                     "row_count": final.get("row_count", 0),
                     "chart_spec": final.get("chart_spec"),
                     "assumptions": final.get("assumptions"),
+                    "verification": final.get("verification", []),
                     "status": final.get("status"),
                     "attempts": final.get("attempts", 0),
                     "identifier_fixes": final.get("identifier_fixes", []),

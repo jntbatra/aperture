@@ -91,7 +91,7 @@ def _after_execute(state: AnalystState) -> str:
         return "diagnose"
     if state.get("row_count", 0) == 0 or _is_zero_scalar(state):
         return "diagnose_empty"
-    return "narrate"
+    return "verify"
 
 
 def _after_diagnose(state: AnalystState) -> str:
@@ -121,8 +121,9 @@ def build_analyst(ctx: AnalystContext | None = None, *, checkpointer=None):
     builder.add_conditional_edges("validate", _after_validate, ["cost_guard", "diagnose", END])
     builder.add_conditional_edges("cost_guard", _after_cost_guard, ["execute", "diagnose"])
     builder.add_conditional_edges(
-        "execute", _after_execute, ["narrate", "diagnose", "diagnose_empty", END]
+        "execute", _after_execute, ["verify", "diagnose", "diagnose_empty", END]
     )
+    builder.add_edge("verify", "narrate")
     builder.add_conditional_edges("diagnose", _after_diagnose, ["generate_sql", "exhausted"])
     builder.add_conditional_edges(
         "diagnose_empty", _after_diagnose_empty, ["generate_sql", "narrate"]
