@@ -40,6 +40,55 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.strip().lower().encode()).hexdigest()[:16]
 
 
+# Guidance specific to a failure class. Postgres names the problem precisely in
+# its sqlstate; repeating the raw message alone leaves the model to rediscover
+# the rule it broke.
+CORRECTIVES = {
+    # undefined table / missing FROM-clause entry
+    "42P01": (
+        "Reference only tables and CTEs that appear in your own FROM or JOIN clauses. "
+        "Every alias you use on the left of a dot must be defined there."
+    ),
+    # undefined column
+    "42703": (
+        "Use only the column names shown in the schema above, spelled exactly, and "
+        "double-quote any camelCase identifier."
+    ),
+    # grouping error
+    "42803": (
+        "Every selected expression must appear in GROUP BY or be inside an aggregate "
+        "function."
+    ),
+    # invalid literal for the column's type, typically an enum
+    "22P02": (
+        "Use only the literal values listed under VALUE HINTS; the value you used is not "
+        "valid for that column's type."
+    ),
+    "42702": "Qualify every ambiguous column with its table alias.",
+    "57014": "The query timed out. Narrow it: filter harder or aggregate earlier.",
+    "too_expensive": "Add a filter or aggregate so the query scans less data.",
+}
+
+SIMPLIFY = (
+    "Prefer the simplest formulation that answers the question: a single SELECT with "
+    "plain aggregates, avoiding CTEs and cross joins."
+)
+
+
+def corrective_for(
+    error_kind: str, *, attempts: int, max_attempts: int, tables: list[str] | None = None
+) -> str:
+    """Build the guidance shown alongside a failed query."""
+    note = CORRECTIVES.get(error_kind, "")
+    if error_kind == "42P01" and tables:
+        note += " Available tables: " + ", ".join(tables[:12]) + "."
+    # Complexity is its own failure mode: on the final attempt, ask for the
+    # simplest thing that could answer the question.
+    if attempts >= max_attempts - 1:
+        note = f"{note} {SIMPLIFY}".strip()
+    return note.strip()
+
+
 @dataclass
 class AnalystContext:
     """Everything the nodes need that must not be serialised into state."""
@@ -314,7 +363,8 @@ def make_nodes(ctx: AnalystContext) -> dict:
         error = estimate.error
         return {
             "last_error": error.for_prompt() if error else estimate.reason,
-            "last_error_kind": "invalid",
+            # Keep the sqlstate: "invalid" says the SQL is wrong, the code says how.
+            "last_error_kind": (error.sqlstate if error and error.sqlstate else "invalid"),
             "repair_note": "",
             "trace": trace,
         }
@@ -357,12 +407,20 @@ def make_nodes(ctx: AnalystContext) -> dict:
         seen_errors = list(state.get("seen_error_keys", []))
         error_key = f"{state.get('last_error_kind')}|{state.get('last_error', '')[:120]}"
 
-        note = ""
+        note = corrective_for(
+            state.get("last_error_kind", ""),
+            attempts=attempts,
+            max_attempts=cfg.max_repair_attempts,
+            tables=state.get("linked_tables", []),
+        )
         # An identical query means the prompt failed to change anything, so the
         # attempt is not charged -- but something must change before retrying.
         identical = sql_hash in seen_sql
         if identical:
-            note = "IDENTICAL: you returned the same query that just failed. Change it."
+            note = (
+                "IDENTICAL: you returned the same query that just failed. Change it. "
+                + note
+            )
         else:
             seen_sql.append(sql_hash)
             attempts += 1

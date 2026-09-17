@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     bedrock_read_timeout: int = 120
 
     # guards
-    max_repair_attempts: int = 2
+    max_repair_attempts: int = 3
     max_empty_retries: int = 1
     row_limit: int = 1000
     statement_timeout_ms: int = 30_000
