@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Aperture — Study Guide</title>
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 16mm 20mm 16mm;
+    @bottom-center {
+      content: "Aperture study guide · " counter(page) " / " counter(pages);
+      font-family: "DejaVu Sans", sans-serif;
+      font-size: 8pt;
+      color: #8a8f98;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 9.6pt;
+    line-height: 1.5;
+    color: #1c1f24;
+    margin: 0;
+  }
+  h1 {
+    font-size: 24pt; margin: 0 0 2mm 0; letter-spacing: -0.4pt; color: #101317;
+  }
+  .sub { color: #5c636e; font-size: 10pt; margin-bottom: 6mm; }
+  .rule { height: 2.4pt; background: #2f6f4f; width: 26mm; margin: 0 0 6mm 0; border-radius: 2pt; }
+  h2 {
+    font-size: 13pt; margin: 8mm 0 3mm 0; padding-bottom: 1.6mm;
+    border-bottom: 0.6pt solid #d7dbe0; color: #101317;
+    break-after: avoid;
+  }
+  h3 {
+    font-size: 10.4pt; margin: 5mm 0 1.6mm 0; color: #2f6f4f;
+    break-after: avoid;
+  }
+  p { margin: 0 0 2.4mm 0; }
+  ul { margin: 0 0 3mm 0; padding-left: 5mm; }
+  li { margin-bottom: 1.4mm; }
+  code {
+    font-family: "DejaVu Sans Mono", monospace; font-size: 8.4pt;
+    background: #f1f3f5; padding: 0.4mm 1mm; border-radius: 1.6pt; color: #14304a;
+  }
+  strong { color: #101317; }
+  .tier {
+    font-size: 7.6pt; text-transform: uppercase; letter-spacing: 0.6pt;
+    color: #ffffff; background: #2f6f4f; padding: 0.8mm 2mm; border-radius: 2pt;
+    vertical-align: middle; margin-left: 2mm; font-weight: bold;
+  }
+  .tier.two { background: #4a6fa5; }
+  .tier.three { background: #8a8f98; }
+  .note {
+    background: #f6f8f7; border-left: 2.4pt solid #2f6f4f;
+    padding: 2.6mm 3.4mm; margin: 0 0 3mm 0; break-inside: avoid;
+  }
+  .warn { background: #fdf7f0; border-left-color: #b4762c; }
+  .qa { break-inside: avoid; margin-bottom: 3mm; }
+  .q { font-weight: bold; color: #101317; }
+  .a { color: #333940; }
+  ol { padding-left: 5mm; margin: 0 0 3mm 0; }
+  .status { font-size: 8.6pt; color: #5c636e; }
+  .grid { display: flex; gap: 4mm; }
+  .grid > div { flex: 1; }
+</style>
+</head>
+<body>
+
+<h1>Aperture</h1>
+<div class="sub">Natural-language SQL analyst — study guide for demo &amp; interview</div>
+<div class="rule"></div>
+
+<div class="note">
+<strong>What the project is.</strong> Ask a question in English; Aperture retrieves the relevant
+subschema, writes SQL, validates it against a parsed syntax tree, executes it read-only, reads any
+database error and repairs itself in a loop, then returns an answer plus a validated chart spec.
+Built on LangGraph, LangChain and LangSmith, with models served from AWS Bedrock.
+<br><br>
+<strong>Guardrails, three independent layers:</strong> a Postgres role that physically cannot write,
+an AST validator that rejects non-<code>SELECT</code> statements, and a planner cost check that
+refuses queries before they scan the table.
+</div>
+
+<h2>Tier 1 — you will be asked about these<span class="tier">core</span></h2>
+
+<h3>LangGraph</h3>
+<ul>
+  <li>State machine over a <code>TypedDict</code>: nodes mutate state, edges route between them.</li>
+  <li><strong>Conditional edges and cycles</strong> — the whole reason this isn't a chain.
+      <code>validate → execute → (error) → diagnose → generate</code> is a loop; LCEL chains are
+      DAGs and cannot express it.</li>
+  <li>Checkpointers give conversation memory and crash resume. Aperture uses the SQLite checkpointer
+      so the tool carries its own state instead of demanding write access to the database it analyses.</li>
+  <li><code>interrupt()</code> pauses the graph mid-run for human approval and resumes from the checkpoint.</li>
+  <li><code>astream_events</code> is the event stream that feeds server-sent events to the UI.</li>
+</ul>
+<div class="note"><span class="q">"Why not just a chain?"</span>
+<span class="a"> Retry-until-valid is a cycle over mutable state. A chain would push that loop into
+plain Python outside the framework, losing checkpointing, tracing and resume.</span></div>
+
+<h3>sqlglot</h3>
+<ul>
+  <li>Parses SQL into an expression tree: <code>parse</code>, <code>parse_one</code>,
+      <code>exp.Select</code>, <code>find_all</code>, <code>.sql(dialect=...)</code>.</li>
+  <li>Dialect transpilation — one AST renders as Postgres, MySQL or SQLite.</li>
+  <li><strong>Why an AST beats a regex:</strong> a comment before <code>DROP TABLE</code>, a
+      <code>DELETE</code> hidden inside a CTE, a second statement after <code>;</code>. A regex
+      misses all three; a parser cannot.</li>
+  <li>Read <code>guards/validator.py</code> — roughly 120 lines, and it is the answer to
+      "how do you stop the model dropping a table".</li>
+</ul>
+
+<h3>Postgres catalog and planner</h3>
+<ul>
+  <li><code>pg_class</code>, <code>pg_attribute</code>, <code>pg_constraint</code>,
+      <code>pg_enum</code> — how 56 tables are read in three queries instead of 56 round-trips.</li>
+  <li><strong><code>pg_stats</code></strong>: <code>most_common_vals</code>,
+      <code>n_distinct</code>, <code>null_frac</code>. The planner already computed these, so
+      profiling borrows them and costs nothing. The cleverest part of the project — know it cold.</li>
+  <li><code>EXPLAIN (FORMAT JSON)</code> → <code>Total Cost</code>, <code>Plan Rows</code>.
+      Cost is in arbitrary planner units, <em>not</em> milliseconds. Be precise about that.</li>
+  <li>Least privilege: <code>GRANT SELECT</code>, <code>default_transaction_read_only</code>,
+      <code>statement_timeout</code>.</li>
+</ul>
+
+<h3>Text-to-SQL as a field</h3>
+<ul>
+  <li><strong>Schema linking</strong> — choosing the right subschema.
+      <strong>Value linking</strong> — choosing the right literals.</li>
+  <li>Value linking is the dominant failure mode. The demo database proves it: the status column
+      contains <code>CONFUSED_CUSTOMER</code>, a literal no model would ever guess.</li>
+  <li><strong>Execution accuracy</strong> versus exact string match: compare result sets,
+      order-insensitively, because many different SQL strings are equally correct.</li>
+  <li>BIRD versus Spider: BIRD is harder, dirtier, and ships external-knowledge hints. Benchmark
+      contamination is a fair criticism — models have seen Spider in training.</li>
+</ul>
+
+<h3>AWS Bedrock</h3>
+<ul>
+  <li>The Converse API gives one interface across model families. Auth is SigV4 through boto3's
+      credential chain — on this machine the keys live in <code>~/.aws/credentials</code>, not
+      in environment variables.</li>
+  <li>Mantle is Bedrock's inference engine, exposing OpenAI-compatible surfaces
+      (<code>/responses</code>, <code>/chat/completions</code>, <code>/messages</code>) at
+      <code>bedrock-mantle.{region}.api.aws</code>.</li>
+  <li>Model ids are region-scoped: <code>qwen.qwen3-coder-next</code> resolves in
+      <code>us-east-1</code> and returns an invalid-identifier error in <code>ap-south-1</code>.
+      A good anecdote — it was hit live during setup.</li>
+</ul>
+<div class="note warn"><strong>Say this carefully.</strong> Per-token pricing for that model is
+unverified here; the spend ledger uses configured, deliberately pessimistic rates so the ceiling
+trips early rather than late. Describe the cost as "estimated and configurable" — never quote a
+price as fact.</div>
+
+<h2>Tier 2 — know the shape, not every detail<span class="tier two">supporting</span></h2>
+
+<h3>Embeddings and retrieval</h3>
+<ul>
+  <li>BGE-base-en-v1.5, 768 dimensions, cosine similarity. Vectors are normalised, so cosine
+      reduces to a dot product.</li>
+  <li><strong>Two-tier retrieval:</strong> embed one document per table first; embed columns only
+      inside candidate tables afterwards. This is the answer to "what if the database is huge" —
+      a 50,000-table warehouse never embeds a million columns.</li>
+  <li>Why no vector database by default: under a thousand vectors, a brute-force NumPy scan takes
+      about 0.3 ms. Know roughly where that breaks (tens of thousands of vectors, bounded by RAM)
+      and name HNSW as what a real index does instead.</li>
+</ul>
+
+<h3>networkx and graph retrieval</h3>
+<ul>
+  <li>BFS expansion, shortest path, junction tables, fan-out detection.</li>
+  <li><strong>The strongest technical story in the project:</strong> the status-history table holds
+      16,812 rows against the orders table's 2,999. A perfectly legal foreign-key join inflates any
+      <code>SUM</code> over order totals by roughly 5.6×, and raises no error at all — just a wrong
+      number. Structure tells you the join is legal; only data tells you it lies.</li>
+</ul>
+
+<h3>LangSmith</h3>
+<ul>
+  <li>Traces are nested runs, one per graph node. Datasets plus evaluators form the eval harness.
+      Feedback captures thumbs up/down for later triage.</li>
+  <li>Traces carry query results off the machine — worth stating plainly, since the demo database
+      holds real customer rows.</li>
+</ul>
+
+<h3>SQLAlchemy 2.0 and psycopg3</h3>
+<ul>
+  <li><code>create_engine</code>, <code>text()</code>, connections versus sessions.</li>
+  <li>Why <code>Inspector</code> is avoided at scale: it issues one round-trip per table.</li>
+</ul>
+
+<h3>Vega-Lite</h3>
+<ul>
+  <li>Grammar of graphics: <code>mark</code> plus <code>encoding</code> (x, y, colour channels) and
+      field types — <code>quantitative</code>, <code>temporal</code>, <code>nominal</code>.</li>
+  <li><strong>Why a declarative spec rather than generated plotting code:</strong> a spec is
+      validated JSON with no execution. An agent that emits Python to draw charts is a
+      remote-code-execution hole wearing a nice hat.</li>
+</ul>
+
+<h2>Tier 3 — skim<span class="tier three">surface</span></h2>
+<ul>
+  <li>FastAPI async, server-sent events versus WebSockets, the browser <code>EventSource</code> API.</li>
+  <li>React with Vite and TypeScript, <code>react-vega</code>, shadcn/ui components.</li>
+  <li>MCP: servers, tool definitions, stdio transport — and why it makes the database reachable
+      from any agent or IDE.</li>
+  <li><code>uv</code>, <code>pyproject.toml</code>, console-script entry points.</li>
+</ul>
+
+<h2>If you have two hours, study in this order</h2>
+<ol>
+  <li>LangGraph cycles, checkpointers, interrupts.</li>
+  <li><code>guards/validator.py</code>, and why an AST beats a regex.</li>
+  <li><code>pg_stats</code>, and what profiling buys that DDL cannot.</li>
+  <li>Schema linking versus value linking.</li>
+  <li>Execution accuracy — and why no number can be cited without ground truth.</li>
+</ol>
+
+<h2>The six questions judges actually ask</h2>
+
+<div class="qa"><span class="q">1. How do you stop it dropping a table?</span><br>
+<span class="a">Three independent layers: a database-enforced read-only role, so
+<code>DELETE</code> fails at the server with <em>cannot execute DELETE in a read-only
+transaction</em>; an AST validator that rejects anything that is not a single read statement; and a
+statement timeout. Demo the error live — it lands better than any slide.</span></div>
+
+<div class="qa"><span class="q">2. How is this different from asking ChatGPT for SQL?</span><br>
+<span class="a">It executes the query, reads the real database error, and repairs itself. It also
+cannot write, cannot scan an entire table, and cannot invent an enum value it has never seen.</span></div>
+
+<div class="qa"><span class="q">3. Does it scale past a toy database?</span><br>
+<span class="a">Introspection cost is flat in table count, retrieval is two-tier, and profiling
+borrows planner statistics instead of scanning.</span></div>
+
+<div class="qa"><span class="q">4. How do you know the answers are right?</span><br>
+<span class="a">Execution accuracy against a benchmark with gold SQL. Be straight that the live demo
+database has no ground truth, so no accuracy number is claimed for it.</span></div>
+
+<div class="qa"><span class="q">5. Why LangGraph rather than a plain chain?</span><br>
+<span class="a">Cycles, checkpoints and interrupts — each load-bearing, none decorative.</span></div>
+
+<div class="qa"><span class="q">6. What breaks it?</span><br>
+<span class="a">Ambiguous business terms, fan-out joins, and empty tables. Naming your own failure
+modes reads as competence, not weakness.</span></div>
+
+<h2>Build status at time of writing</h2>
+<p class="status">
+On disk: <code>config.py</code>, <code>budget.py</code> (token and spend ledger with a hard
+ceiling), <code>llm.py</code>, <code>guards/validator.py</code>, <code>guards/cost.py</code>,
+<code>db/connection.py</code>, <code>db/introspect.py</code>, <code>db/profile.py</code>, plus
+repository scaffolding and an MIT licence. The <code>aperture_ro</code> Postgres role exists and
+is verified: reads succeed, writes are refused by the server. Not yet written: the foreign-key
+graph, embeddings and linker, the LangGraph loop, the chart node, the SSE server, the CLI, the MCP
+server, the React client, and the benchmark harness. Nothing is committed yet.
+</p>
+
+</body>
+</html>

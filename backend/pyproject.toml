@@ -1,0 +1,53 @@
+[project]
+name = "aperture"
+version = "0.1.0"
+description = "Natural-language SQL analyst with a self-correcting query loop, graph-based schema linking, and validated chart output."
+requires-python = ">=3.12,<3.14"
+license = { text = "MIT" }
+dependencies = [
+    "langgraph>=0.2.50",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    "langchain-core>=0.3.25",
+    "langchain-aws>=0.2.10",
+    "langsmith>=0.2.0",
+    "boto3>=1.35.0",
+    "sqlglot>=26.0.0",
+    "sqlalchemy>=2.0.36",
+    "psycopg[binary]>=3.2.3",
+    "pymysql>=1.1.1",
+    "sentence-transformers>=3.3.0",
+    "numpy>=2.0.0",
+    "networkx>=3.4",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sse-starlette>=2.1.3",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "python-dotenv>=1.0.1",
+    "typer>=0.15.0",
+    "rich>=13.9.0",
+    "pyyaml>=6.0.2",
+    "jsonschema>=4.23.0",
+    "mcp>=1.2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0"]
+
+[project.scripts]
+aperture = "aperture.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["aperture"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

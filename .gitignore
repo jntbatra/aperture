@@ -1,0 +1,27 @@
+# secrets
+.env
+.env.local
+*.pem
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# node
+node_modules/
+frontend/dist/
+
+# data / caches
+benchmarks/mini_dev_data/
+benchmarks/*.sqlite
+benchmarks/*.zip
+*.npy
+.aperture/
+cache/
+
+# os
+.DS_Store
