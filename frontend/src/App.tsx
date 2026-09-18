@@ -18,15 +18,16 @@ import {
   type Me,
 } from './lib/api'
 import { renderGoogleButton, signOutGoogle } from './lib/google'
+import { Composer } from './components/Composer'
+import { Message, type TurnData } from './components/Message'
 import { Sidebar } from './components/Sidebar'
 import { describeStep } from './components/Timeline'
-import { Turn, type TurnData } from './components/Turn'
 
 const STARTERS = [
-  'What was total revenue by region?',
-  'How did this change month by month?',
-  'Which product sells the most?',
-  'What share of orders were refunded?',
+  'What is in this data?',
+  'Show the totals by category',
+  'How has this changed over time?',
+  'What stands out?',
 ]
 
 export default function App() {
@@ -36,9 +37,9 @@ export default function App() {
   const [connections, setConnections] = useState<ConnectionInfo[]>([])
   const [activeConnection, setActiveConnection] = useState('')
   const [turns, setTurns] = useState<TurnData[]>([])
-  const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [dragging, setDragging] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
 
   const refreshConnections = useCallback(async () => {
@@ -58,7 +59,6 @@ export default function App() {
     refreshConversations()
   }, [refreshConnections, refreshConversations])
 
-  // Sign-in button renders only when the server has a client id configured.
   useEffect(() => {
     if (!me || !me.anonymous || !me.auth_enabled) return
     let cancelled = false
@@ -91,9 +91,8 @@ export default function App() {
     setActiveId(id)
     const detail = await fetchConversation(id).catch(() => null)
     if (!detail) return
-    setActiveConnection(detail.connection || activeConnection)
+    setActiveConnection(detail.connection || '')
 
-    // Rebuild the transcript: each question and the answer it produced.
     const restored: TurnData[] = []
     for (const message of detail.messages) {
       if (message.role === 'user') {
@@ -105,12 +104,13 @@ export default function App() {
     setTurns(restored)
   }
 
-  async function newChat() {
+  async function newChat(): Promise<string> {
     const conversation = await createConversation(activeConnection).catch(() => null)
-    if (!conversation) return
+    if (!conversation) return ''
     setActiveId(conversation.id)
     setTurns([])
     await refreshConversations()
+    return conversation.id
   }
 
   async function removeChat(id: string) {
@@ -125,7 +125,6 @@ export default function App() {
   async function submit(text: string) {
     const trimmed = text.trim()
     if (!trimmed || busy) return
-    setQuestion('')
     setBusy(true)
     setNotice('')
 
@@ -154,27 +153,25 @@ export default function App() {
     await refreshConversations()
   }
 
+  /** A file dropped or attached belongs to the chat it arrived in. */
   async function handleUpload(file: File) {
     setBusy(true)
     setNotice(`reading ${file.name}…`)
+    const conversationId = activeId || (await newChat())
     try {
-      const result = await uploadDataset(file)
-      setNotice(`${result.name}: ${result.rows.toLocaleString()} rows loaded`)
+      const result = await uploadDataset(file, conversationId)
       setActiveConnection(result.name)
-      await refreshConnections()
-      await newChat()
+      setTurns((previous) => [
+        ...previous,
+        { question: `Uploaded ${file.name}`, steps: [], running: false, upload: result },
+      ])
+      await Promise.all([refreshConnections(), refreshConversations()])
+      setNotice('')
     } catch (err) {
       setNotice(String(err instanceof Error ? err.message : err))
     } finally {
       setBusy(false)
     }
-  }
-
-  async function handleAddConnection(name: string, url: string) {
-    await addConnection(name, url)
-    setActiveConnection(name)
-    await refreshConnections()
-    await newChat()
   }
 
   function signOut() {
@@ -187,8 +184,23 @@ export default function App() {
     refreshConversations()
   }
 
+  const hasData = Boolean(activeConnection) || connections.length > 0
+
   return (
-    <div className="flex h-full">
+    <div
+      className="flex h-full"
+      onDragOver={(event) => {
+        event.preventDefault()
+        setDragging(true)
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(event) => {
+        event.preventDefault()
+        setDragging(false)
+        const file = event.dataTransfer.files?.[0]
+        if (file) handleUpload(file)
+      }}
+    >
       <Sidebar
         me={me}
         conversations={conversations}
@@ -209,75 +221,76 @@ export default function App() {
           await refreshConnections()
         }}
         onUpload={handleUpload}
-        onAddConnection={handleAddConnection}
+        onAddConnection={async (name, url) => {
+          await addConnection(name, url)
+          setActiveConnection(name)
+          await refreshConnections()
+          await newChat()
+        }}
         onSignOut={signOut}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-(--color-edge) px-6 py-3">
-          <div className="text-sm text-(--color-muted)">
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        {dragging && (
+          <div className="pointer-events-none absolute inset-3 z-20 grid place-items-center rounded-2xl border-2 border-dashed border-(--color-accent)/60 bg-(--color-ink)/80">
+            <p className="text-sm text-(--color-accent)">Drop a CSV, Excel, SQLite or SQL dump</p>
+          </div>
+        )}
+
+        <header className="flex items-center justify-between px-6 py-3 text-sm">
+          <span className="text-(--color-muted)">
             {activeConnection ? (
               <>
                 asking <span className="text-slate-200">{activeConnection}</span>
               </>
             ) : (
-              'no data connected'
+              'no data yet'
             )}
-          </div>
-          {notice && <div className="text-xs text-(--color-muted)">{notice}</div>}
+          </span>
+          {notice && <span className="text-xs text-(--color-muted) shimmer">{notice}</span>}
         </header>
 
-        <main className="flex-1 space-y-8 overflow-auto px-6 py-6">
-          {turns.length === 0 && (
-            <div className="space-y-3">
-              <p className="text-sm text-(--color-muted)">
-                {connections.length
-                  ? 'Ask anything about the connected data.'
-                  : 'Upload a CSV, Excel workbook or SQLite file to begin.'}
-              </p>
-              {connections.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {STARTERS.map((starter) => (
-                    <button
-                      key={starter}
-                      onClick={() => submit(starter)}
-                      className="rounded-full border border-(--color-edge) bg-(--color-panel) px-3 py-1.5 text-sm text-slate-300 transition hover:border-(--color-accent)/50 hover:text-white"
-                    >
-                      {starter}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+        <main className="flex-1 overflow-auto">
+          <div className="mx-auto max-w-3xl space-y-8 px-4 py-8">
+            {turns.length === 0 && (
+              <div className="pt-16 text-center">
+                <h1 className="text-2xl font-semibold tracking-tight">
+                  {hasData ? 'Ask anything about your data' : 'Start with a file'}
+                </h1>
+                <p className="mt-2 text-(--color-muted)">
+                  {hasData
+                    ? 'Every answer shows the SQL that produced it.'
+                    : 'Drop a CSV, Excel workbook, SQLite file or SQL dump anywhere on this page.'}
+                </p>
+                {hasData && (
+                  <div className="mt-8 grid gap-2 sm:grid-cols-2">
+                    {STARTERS.map((starter) => (
+                      <button
+                        key={starter}
+                        onClick={() => submit(starter)}
+                        className="rounded-xl border border-(--color-edge) bg-(--color-panel) px-4 py-3 text-left text-sm text-slate-300 transition hover:border-(--color-muted) hover:text-white"
+                      >
+                        {starter}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
-          {turns.map((turn, index) => (
-            <Turn key={index} turn={turn} busy={busy} onAsk={submit} />
-          ))}
-          <div ref={endRef} />
+            {turns.map((turn, index) => (
+              <Message key={index} turn={turn} busy={busy} onAsk={submit} />
+            ))}
+            <div ref={endRef} />
+          </div>
         </main>
 
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            submit(question)
-          }}
-          className="flex gap-2 border-t border-(--color-edge) px-6 py-4"
-        >
-          <input
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            placeholder="Ask about the data…"
-            className="flex-1 rounded-lg border border-(--color-edge) bg-(--color-panel) px-4 py-2.5 text-sm outline-none placeholder:text-(--color-muted) focus:border-(--color-accent)/60"
-          />
-          <button
-            type="submit"
-            disabled={busy || !question.trim()}
-            className="rounded-lg bg-(--color-accent) px-4 py-2.5 text-sm font-medium text-black transition disabled:opacity-40"
-          >
-            {busy ? 'Asking…' : 'Ask'}
-          </button>
-        </form>
+        <Composer
+          busy={busy}
+          placeholder={hasData ? 'Ask about the data…' : 'Attach a file to begin…'}
+          onSubmit={submit}
+          onAttach={handleUpload}
+        />
       </div>
     </div>
   )

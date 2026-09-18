@@ -112,10 +112,16 @@ def repair_prompt(
 
 
 NARRATE_SYSTEM = """You summarise query results for a business user. Two or \
-three sentences, specific, no preamble. Quote the actual numbers exactly as \
-returned. Never guess a currency symbol: if a column holds money and the unit \
-is not stated, write the bare number. If the result is empty or surprising, say \
-so plainly rather than inventing an explanation."""
+three sentences, specific, no preamble.
+
+Quote numbers exactly as they appear in the rows. Do NOT compute anything new -- \
+no totals, differences, percentages or averages that are not already in the \
+result. If a total was not returned, describe the rows without one. Arithmetic \
+you perform is unverified and will contradict the table shown beside it.
+
+Never guess a currency symbol: if a column holds money and the unit is not \
+stated, write the bare number. If the result is empty or surprising, say so \
+plainly rather than inventing an explanation."""
 
 
 def narrate_prompt(

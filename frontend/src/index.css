@@ -1,18 +1,40 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: #0b0d10;
-  --color-panel: #12151a;
-  --color-edge: #1f242c;
-  --color-muted: #8b95a5;
-  --color-accent: #4ade80;
+  --color-ink: #0c0c0e;
+  --color-raised: #141417;
+  --color-panel: #17171b;
+  --color-edge: #26262c;
+  --color-muted: #8b8b96;
+  --color-accent: #10a37f;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
 }
 
 html, body, #root { height: 100%; }
+
 body {
   background: var(--color-ink);
-  color: #e6eaf0;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #ececf1;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #232833; border-radius: 6px; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2e2e36; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a44; }
+
+/* The answer fades in rather than snapping, which reads as composed. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: rise 220ms ease-out both; }
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
+.shimmer { animation: shimmer 1.4s ease-in-out infinite; }

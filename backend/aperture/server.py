@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -47,6 +47,7 @@ from .store import (
     list_conversations,
     list_messages,
     rename_conversation,
+    set_conversation_connection,
 )
 
 log = logging.getLogger(__name__)
@@ -310,6 +311,9 @@ async def ask(body: AskRequest, user: User = Depends(current_user)):
             pending_question = ""
 
     add_message(conversation_id, "user", body.question)
+    # Name the chat after what it is about, once.
+    if conversation.title in {"New chat", ""}:
+        rename_conversation(user.id, conversation_id, body.question[:60])
 
     async def events():
         final: dict = {}
@@ -403,8 +407,17 @@ async def drop_connection(name: str, user: User = Depends(current_user)):
 
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...), user: User = Depends(current_user)):
-    """Accept a CSV, Excel workbook or SQLite file and register it."""
+async def upload(
+    file: UploadFile = File(...),
+    conversation_id: str = Form(default=""),
+    user: User = Depends(current_user),
+):
+    """Accept a CSV, Excel workbook, SQLite file or SQL dump and register it.
+
+    When a conversation is given the dataset is attached to that chat, so an
+    uploaded file belongs to the conversation it arrived in rather than
+    silently becoming the global default.
+    """
     refuse_when_hosted("uploading a file")
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in {
@@ -439,12 +452,32 @@ async def upload(file: UploadFile = File(...), user: User = Depends(current_user
     register_upload(user, result, name=name, source=file.filename or name, kind=kind)
     forget_analyst(result.database_url)
 
+    attached = ""
+    if conversation_id and get_conversation(user.id, conversation_id):
+        set_conversation_connection(user.id, conversation_id, name)
+        attached = conversation_id
+
+    # Describe what arrived, so the chat can show it rather than a bare "ok".
+    _, ctx = analyst_for(result.database_url)
+    tables = [
+        {
+            "name": table_name,
+            "rows": ctx.bundle.profile.tables[table_name].exact_rows
+            if table_name in ctx.bundle.profile.tables
+            else 0,
+            "columns": len(table.columns),
+        }
+        for table_name, table in sorted(ctx.bundle.snapshot.tables.items())
+    ]
+
     return {
         "ok": True,
         "name": name,
         "kind": kind,
         "rows": result.rows,
         "table": result.table,
+        "tables": tables,
+        "conversation_id": attached,
         "columns": [{"name": c.name, "type": c.sql_type} for c in result.columns],
     }
 

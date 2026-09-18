@@ -54,6 +54,15 @@ export interface Me {
   auth_enabled: boolean
 }
 
+/**
+ * Where the API lives.
+ *
+ * In development Vite proxies /api to the backend. In production the backend
+ * serves this bundle itself, so the routes sit at the root -- prefixing /api
+ * there 404s every call and the app silently looks empty.
+ */
+const API_BASE = import.meta.env.DEV ? '/api' : ''
+
 const TOKEN_KEY = 'aperture.token'
 
 export function getToken(): string {
@@ -71,7 +80,7 @@ function headers(extra: Record<string, string> = {}): Record<string, string> {
 }
 
 async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: headers(init.body ? { 'content-type': 'application/json' } : {}),
   })
@@ -113,21 +122,26 @@ export const signInWithGoogle = (credential: string) =>
     body: JSON.stringify({ credential }),
   })
 
-export async function uploadDataset(file: File): Promise<{
+export interface UploadResult {
   name: string
   kind: string
   rows: number
   table: string
+  tables: { name: string; rows: number; columns: number }[]
+  conversation_id: string
   columns: { name: string; type: string }[]
-}> {
+}
+
+export async function uploadDataset(file: File, conversationId = ''): Promise<UploadResult> {
   const form = new FormData()
   form.append('file', file)
-  const response = await fetch('/api/upload', { method: 'POST', headers: headers(), body: form })
+  if (conversationId) form.append('conversation_id', conversationId)
+  const response = await fetch(`${API_BASE}/upload`, { method: 'POST', headers: headers(), body: form })
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}))
     throw new Error(detail.detail ?? 'upload failed')
   }
-  return response.json()
+  return response.json() as Promise<UploadResult>
 }
 
 export interface StreamHandlers {
@@ -150,7 +164,7 @@ export async function askStream(
   connection: string,
   handlers: StreamHandlers,
 ): Promise<void> {
-  const response = await fetch('/api/ask', {
+  const response = await fetch(`${API_BASE}/ask`, {
     method: 'POST',
     headers: headers({ 'content-type': 'application/json' }),
     body: JSON.stringify({ question, conversation_id: conversationId, connection }),
