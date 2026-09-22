@@ -287,3 +287,192 @@ def test_allow_list_still_rejects_genuinely_unknown_tables():
     """Case-insensitivity must not become "accept anything"."""
     with pytest.raises(ValidationError, match="not provided in the schema"):
         validate("SELECT * FROM salaries", allowed_tables={"Player", "Match"})
+
+
+# --------------------------------------------------------------------------
+# Attacking the validator
+#
+# Written after someone asked whether a subquery could hide a DROP. The answer
+# turned out to be no — `find_all(exp.CTE)` is a recursive walk, so nesting
+# does not help — but the exercise found three real gaps, and these are the
+# regression tests for them.
+#
+# The honest framing, which belongs beside the tests: this is the *second* of
+# three layers. A denylist of function names protects against what somebody
+# thought of. The read-only role is what actually holds.
+# --------------------------------------------------------------------------
+
+ATTACK_TABLES = {"orders", "users", "items", "gone", "d", "x", "t", "s"}
+
+
+def refuses(sql: str) -> bool:
+    from sqlagent.guards.validator import ValidationError, validate
+
+    try:
+        validate(sql, dialect="postgres", allowed_tables=ATTACK_TABLES, row_limit=100)
+    except ValidationError:
+        return True
+    except Exception:
+        return True
+    return False
+
+
+def test_a_string_that_merely_looks_dangerous_is_allowed():
+    """The naive-guard failure in the other direction. A keyword denylist over
+    the query *text* refuses this, and it is a completely harmless SELECT of a
+    string literal."""
+    assert not refuses("SELECT 'DROP TABLE orders' AS example")
+
+
+def test_a_column_value_containing_sql_is_allowed():
+    assert not refuses("SELECT * FROM orders WHERE status = 'delete from users'")
+
+
+def test_a_column_named_after_a_keyword_is_allowed():
+    assert not refuses('SELECT "delete" FROM orders')
+
+
+# --- writes hidden in a WITH, at every depth -------------------------------
+
+
+def test_a_deleting_cte_is_refused():
+    assert refuses("WITH gone AS (DELETE FROM orders RETURNING *) SELECT * FROM gone")
+
+
+def test_an_updating_cte_is_refused():
+    assert refuses("WITH d AS (UPDATE orders SET total = 0 RETURNING *) SELECT * FROM d")
+
+
+def test_an_inserting_cte_is_refused():
+    assert refuses("WITH d AS (INSERT INTO orders VALUES (1) RETURNING *) SELECT * FROM d")
+
+
+def test_a_deleting_cte_inside_a_subquery_is_refused():
+    """The question that prompted all of this. `find_all` descends, so nesting
+    buys an attacker nothing."""
+    assert refuses(
+        "SELECT * FROM (WITH d AS (DELETE FROM orders RETURNING *) SELECT * FROM d) s"
+    )
+
+
+def test_a_deleting_cte_inside_an_in_clause_is_refused():
+    assert refuses(
+        "SELECT * FROM users WHERE id IN "
+        "(WITH d AS (DELETE FROM orders RETURNING id) SELECT id FROM d)"
+    )
+
+
+def test_a_deleting_cte_in_a_scalar_subquery_is_refused():
+    assert refuses(
+        "SELECT (WITH d AS (DELETE FROM orders RETURNING 1) SELECT count(*) FROM d) AS n"
+    )
+
+
+def test_a_deleting_cte_two_levels_deep_is_refused():
+    assert refuses(
+        "WITH a AS (WITH d AS (DELETE FROM orders RETURNING *) SELECT * FROM d) SELECT * FROM a"
+    )
+
+
+def test_a_deleting_cte_in_a_union_branch_is_refused():
+    assert refuses(
+        "SELECT 1 UNION ALL (WITH d AS (DELETE FROM orders RETURNING 1) SELECT 1 FROM d)"
+    )
+
+
+# --- SQL passed to a function as a string ----------------------------------
+#
+# The dangerous class and the one most easily missed: the statement really is a
+# SELECT, its CTEs really do only read, and the DELETE is inside a string
+# argument where no AST check can see it. Found by attacking this file; the
+# read-only transaction caught it, which is why that layer exists — but a guard
+# that relies on the next guard is not a guard.
+
+
+def test_query_to_xml_executing_sql_is_refused():
+    assert refuses("SELECT query_to_xml('DELETE FROM orders', true, true, '')")
+
+
+def test_table_to_xml_is_refused():
+    assert refuses("SELECT table_to_xml('orders', true, true, '')")
+
+
+def test_query_to_xml_hidden_in_a_cte_is_refused():
+    assert refuses(
+        "WITH x AS (SELECT query_to_xml('DROP TABLE orders', true, true, '') AS v) "
+        "SELECT * FROM x"
+    )
+
+
+# --- state that is not table data ------------------------------------------
+
+
+def test_advancing_a_sequence_is_refused():
+    """Not table data, and still a persistent change: a question must not be
+    able to renumber anything."""
+    assert refuses("SELECT nextval('s')")
+
+
+def test_setting_a_sequence_is_refused():
+    assert refuses("SELECT setval('s', 1)")
+
+
+def test_reading_a_sequence_is_allowed():
+    """`currval` only reads. Refusing it would be a denylist that had stopped
+    distinguishing."""
+    assert not refuses("SELECT currval('s')")
+
+
+def test_changing_server_configuration_is_refused():
+    assert refuses("SELECT pg_reload_conf()")
+
+
+def test_changing_session_configuration_is_refused():
+    assert refuses("SELECT set_config('work_mem', '1GB', false)")
+
+
+def test_taking_an_advisory_lock_is_refused():
+    assert refuses("SELECT pg_advisory_lock(1)")
+
+
+# --- locking reads ---------------------------------------------------------
+
+
+def test_a_locking_read_is_refused():
+    """Structural, not a function name. A locking read returns rows and changes
+    none, and blocks writers for the length of the transaction — a way for an
+    analytics question to stall an application."""
+    assert refuses("SELECT * FROM orders FOR UPDATE")
+
+
+def test_for_share_is_refused_too():
+    assert refuses("SELECT * FROM orders FOR SHARE")
+
+
+# --- the rest --------------------------------------------------------------
+
+
+def test_a_stacked_statement_is_refused():
+    assert refuses("SELECT 1; DROP TABLE orders")
+
+
+def test_a_statement_hidden_after_a_comment_is_refused():
+    assert refuses("SELECT 1 -- \nDROP TABLE orders")
+
+
+def test_select_into_is_refused():
+    """It creates a table. The top-level node is still a Select, which is
+    exactly the kind of thing a shallow type check waves through."""
+    assert refuses("SELECT * INTO backup FROM orders")
+
+
+def test_a_do_block_is_refused():
+    assert refuses("DO $$ BEGIN DROP TABLE orders; END $$")
+
+
+def test_copy_to_program_is_refused():
+    assert refuses("COPY orders TO PROGRAM 'rm -rf /'")
+
+
+def test_a_table_the_model_was_not_shown_is_refused():
+    assert refuses("SELECT * FROM pg_shadow")

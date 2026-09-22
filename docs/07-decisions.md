@@ -1083,6 +1083,94 @@ weaker than it looks.
 
 ---
 
+## Attacking the validator
+
+Prompted by a fair question: *is the table check naive, and what if a subquery
+hides a DROP?* Worth answering by attack rather than by reading the code.
+
+### The two shapes that separate a real guard from a naive one
+
+```sql
+-- Refused by a keyword denylist over the query text. Completely harmless.
+SELECT 'DROP TABLE orders' AS example_of_a_dangerous_command
+
+-- Allowed by a keyword denylist looking for a leading DELETE. Deletes data.
+WITH gone AS (DELETE FROM orders RETURNING *) SELECT * FROM gone
+```
+
+Both behave correctly here, and for the same reason: the check is over a parsed
+**AST**, not over text. The first is a string literal and the parser knows it.
+The second is caught by `_reject_data_modifying_ctes`.
+
+### Nesting does not help
+
+`find_all(exp.CTE)` is a recursive walk, so the depth of the hiding place is
+irrelevant. Twenty-six cases were run; all behaved as expected:
+
+| Attack | |
+|---|---|
+| `DELETE`-CTE inside a subquery | refused |
+| inside an `IN (...)` | refused |
+| inside a scalar subquery in the select list | refused |
+| two CTEs deep | refused |
+| inside a `UNION` branch | refused |
+| stacked after `;` | refused |
+| hidden after a `--` comment | refused |
+| `SELECT ... INTO backup` (creates a table, top node is still `Select`) | refused |
+| `DO $$ ... $$`, `COPY ... TO PROGRAM` | refused |
+
+### What the attack actually found
+
+Three gaps, none of them about nesting:
+
+**`query_to_xml('DELETE FROM orders', ...)`** — the dangerous class. The
+statement genuinely is a `SELECT`, its CTEs genuinely only read, and the
+`DELETE` sits inside a *string argument* where no AST check can see it. Now in
+the denylist, along with `table_to_xml` and the `query_to_xmlschema` family.
+
+**`nextval` / `setval`** — not table data, and still a persistent change. A
+question must not be able to renumber anything.
+
+**`pg_reload_conf`, `set_config`, advisory locks, `FOR UPDATE`** — server and
+session state, and a locking read that blocks writers for the length of the
+transaction. The locking check is structural rather than a function name,
+because it is syntax.
+
+### What happened when the gaps were run against the real database
+
+This is the part worth keeping. Each one that got past the validator was then
+sent through `aperture_ro` in the read-only transaction the agent actually
+uses:
+
+| Got past the validator | The database said |
+|---|---|
+| `query_to_xml('DELETE …')` | **blocked** — "DELETE is not allowed in a non-volatile function" |
+| `pg_reload_conf()` | **blocked** — permission denied for function |
+| `SELECT … FOR UPDATE` | **blocked** — cannot execute SELECT FOR UPDATE in a read-only transaction |
+| `nextval` / `setval` | ran — and `aperture_ro` has **no USAGE or UPDATE** on the one sequence in the database, so nothing could have been changed |
+| `set_config('work_mem', …)` | ran — session-scoped, a resource concern rather than a data one |
+
+Nothing was modified: `orders` still has its original row count and the sequence still
+reads its original value.
+
+### The conclusion, stated plainly
+
+The function denylist is **the weakest of the three layers and cannot be
+complete**. It is a list of names, so it protects against what somebody thought
+of, and three entries in it exist because they were found by attacking the file
+rather than by reading it.
+
+The read-only role is what actually holds. That is not a reason to skip the
+other two — a guard that relies on the next guard is not a guard, and the
+validator's refusals are sentences a model can repair from rather than driver
+errors surfaced three layers later — but it is the honest ordering, and it is
+why the connection check in `saas/connect.py` *tests* a tenant's role rather
+than believing them about it.
+
+Twenty-six attacks are now permanent tests in `tests/test_validator.py`.
+
+---
+
 ## Current state, honestly
 
 **Full BIRD mini-dev, all 500 questions, `qwen3-coder-480b`:**

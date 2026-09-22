@@ -45,8 +45,17 @@ ALLOWED_STATEMENTS: tuple[type[exp.Expression], ...] = (
     exp.Intersect,
 )
 
-# Functions that read or write outside the queried tables. All are legitimate
-# Postgres features; none belong in a generated analytics query.
+# Functions that read or write outside the queried tables, or change state
+# that is not data. All are legitimate Postgres features; none belong in a
+# generated analytics query.
+#
+# **This list is the weakest of the three layers, and it cannot be complete.**
+# It is a denylist of names, so it protects against what someone thought of.
+# Every entry below was added because it was found, several of them by
+# attacking this validator rather than by reading it — and the honest
+# conclusion is that the read-only role is what actually holds. The measured
+# evidence for that is in docs/07-decisions.md: three of the functions here got
+# past this check and were stopped by the database anyway.
 FORBIDDEN_FUNCTIONS = frozenset(
     {
         # Filesystem access
@@ -59,8 +68,40 @@ FORBIDDEN_FUNCTIONS = frozenset(
         # Reaching another database
         "dblink",
         "dblink_exec",
+        # Executing SQL passed as a string.
+        #
+        # The dangerous class, and the one a reader is most likely to miss:
+        # `query_to_xml('DELETE FROM orders', ...)` is a SELECT containing a
+        # function call containing a DELETE. Every structural check above
+        # passes — the statement really is a SELECT, the CTEs really do only
+        # read — and the argument is a string, so nothing that inspects the
+        # AST can see the statement inside it.
+        #
+        # Found by attacking this file. The read-only transaction stopped it
+        # ("DELETE is not allowed in a non-volatile function"), which is
+        # exactly why that layer exists, but a guard that relies on the next
+        # guard is not a guard.
+        "query_to_xml",
+        "query_to_xmlschema",
+        "query_to_xml_and_xmlschema",
+        "table_to_xml",
+        # Sequence state. Not table data, and still a persistent change: a
+        # question must not be able to renumber anything. `currval` is absent
+        # deliberately — it only reads.
+        "nextval",
+        "setval",
+        # Server and session state
+        "pg_reload_conf",
+        "pg_rotate_logfile",
+        "set_config",
+        # Locks a read has no business taking, and that outlive the statement
+        "pg_advisory_lock",
+        "pg_advisory_xact_lock",
+        "pg_try_advisory_lock",
         # Denial of service
         "pg_sleep",
+        "pg_sleep_for",
+        "pg_sleep_until",
         "pg_terminate_backend",
         "pg_cancel_backend",
     }
@@ -147,6 +188,7 @@ def validate(
 
     _reject_non_select(statement)
     _reject_forbidden_functions(statement)
+    _reject_locking_clauses(statement)
     _reject_data_modifying_ctes(statement)
 
     tables = _referenced_tables(statement)
@@ -223,6 +265,27 @@ def _function_name(node: exp.Expression) -> str | None:
         value = node.args.get("this")
         return value if isinstance(value, str) else None
     return type(node).__name__ if isinstance(node, exp.Func) else None
+
+
+def _reject_locking_clauses(statement: exp.Expression) -> None:
+    """Refuse ``FOR UPDATE`` / ``FOR SHARE``.
+
+    Structural rather than a function name, because this is syntax. A locking
+    read is still a read — it returns rows and changes none — but it takes row
+    locks that block writers for the length of the transaction, which is a way
+    for an analytics question to stall an application. Nothing an analyst asks
+    needs it.
+
+    The read-only transaction rejects these too. This exists so the refusal is
+    a sentence the model can repair from rather than a driver error surfaced
+    three layers later.
+    """
+    for node in statement.find_all(exp.Lock):
+        raise ValidationError(
+            "Locking reads (FOR UPDATE / FOR SHARE) are not permitted; "
+            "they block writers for the length of the transaction. "
+            f"Remove the {node.sql().strip() or 'locking'} clause."
+        )
 
 
 def _reject_data_modifying_ctes(statement: exp.Expression) -> None:
