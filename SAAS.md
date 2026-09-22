@@ -102,6 +102,109 @@ Vertically, in dependency order. Each is finished and tested before the next.
 | 62 | Short-lived browser tokens, so a key never reaches a page | Required before the browser SDK ships |
 | 63 | AWS deployment: ECS Fargate, RDS, CloudFront, Secrets Manager | Last, because it packages the above |
 
+## Connecting a tenant's database, and not trusting them about it
+
+A tenant pastes a connection string and says the role is read-only. That is a
+claim about *their* database, by someone who may have created the role five
+minutes ago from a guide they skimmed. Believing it means the product's central
+promise — "it cannot damage your data" — rests on a stranger having configured
+`GRANT` correctly.
+
+So `saas/connect.py` **tests** the role before saving the connection. It tries
+to write, inside a transaction it rolls back, and requires the database to
+refuse:
+
+| Probe | Statement |
+|---|---|
+| `CREATE TABLE` | can it add objects? |
+| `INSERT` | `INSERT INTO t SELECT * FROM t WHERE 1 = 0` |
+| `UPDATE` | `UPDATE t SET c = c WHERE 1 = 0` |
+| `DELETE` | `DELETE FROM t WHERE 1 = 0` |
+
+Four separate powers, because a role can lack one and hold another, and any one
+of them loses data.
+
+**Every probe is a no-op even if it succeeds.** The predicates match nothing,
+so a probe that is wrongly permitted *and* whose rollback fails still changes
+nothing. Writing a probe that would do damage in order to find out whether
+damage is possible is not an acceptable design.
+
+### Why this is the strongest check in the system
+
+Every other defence is code in this process — the SQL validator, the cost gate,
+the read-only transaction — and code in this process is the thing most likely to
+have a bug in it. The connected role is the only boundary enforced by the
+database itself, on the other side of the network, by software nobody here
+wrote. It is the one that still holds if everything in this repository is wrong.
+
+Verified against the live production database:
+
+```
+aperture_ro      usable=True   all 4 probes refused, 56 tables
+app_owner_user  usable=False  "That role can still CREATE TABLE, INSERT,
+                                DELETE, UPDATE"
+```
+
+Nothing was left behind in either case. A failed probe is a **hard rejection**,
+not a warning: a tenant told "we could not verify this is read-only" and allowed
+to continue has been given a safety property they do not have, in writing, by a
+product whose main promise is that property.
+
+SQLite is refused outright — a file has no role to make read-only, and a tenant
+"connecting" one in a hosted product is pointing at our disk. They are told to
+upload it instead, which already works.
+
+---
+
+## Tiers, and why they are mostly about the AI
+
+Most SaaS tiers gate features. This one gates **inference**, because that is
+where the money goes: a question is three model calls by default and six on
+`thorough`. Selling that flat is selling a variable cost of goods at a fixed
+price, and it works right up until a customer finds the toggle.
+
+| | Free | Pro | Enterprise |
+|---|---|---|---|
+| Price / month | $0 | $49 | negotiated |
+| Questions / month | 100 | 2,000 | unlimited |
+| Quality tier | fast | **thorough** | thorough |
+| Strong model | — | yes | yes |
+| Connected databases | 1 | 3 | unlimited |
+| Uploaded datasets | 1 | 25 | unlimited |
+| Seats | 1 | 5 | unlimited |
+| Row limit | 500 | 5,000 | 50,000 |
+| History retention | 7 days | 180 days | 3 years |
+
+Names match Unilink's `SUBSCRIPTION_PLAN` exactly, so the two products can share
+one billing story instead of a translation table living somewhere forever.
+
+**The free tier is a real product.** It is pinned to the light model, which
+measured 58.7% on BIRD — good enough to be useful. A free tier that teaches
+people the tool does not work is worse than no free tier.
+
+**Options are clamped, not rejected.** A free user who sends
+`quality_tier: "thorough"` — from the docs, an old SDK, a shared snippet — gets
+a fast answer, not a 402. Refusing the whole question because one optional field
+was too ambitious turns an upsell into an outage. Voting and the critic are
+clamped alongside it, since they are the same trade under different names.
+
+**Quotas are checked before a question, never during one.** A tenant who hits
+the limit on the third call of a four-call question gets that question finished.
+Cutting a request in half to save one model call produces a broken answer, a
+support ticket and a refund, which costs more than the call.
+
+**Limits are data, not conditionals.** `if plan == "pro"` scattered through the
+request path puts pricing policy in a dozen files, and the day a limit changes
+one of them is missed. A test asserts each tier is at least as generous as the
+one below it across all six numeric limits, because an inversion among eighteen
+numbers is invisible by eye.
+
+**Unknown plan names resolve to FREE**, not to the most permissive. A typo, a
+renamed plan or a row written by an older version should under-serve rather than
+hand out an enterprise entitlement.
+
+---
+
 ## Hosting shape
 
 ```
