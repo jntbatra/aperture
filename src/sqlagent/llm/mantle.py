@@ -102,7 +102,8 @@ class BedrockTokenAuth(httpx.Auth):
     """Re-mint after this long. Half the real lifetime, so a long request that
     starts just under the wire still finishes with a valid token."""
 
-    def __init__(self) -> None:
+    def __init__(self, region: str) -> None:
+        self._region = region
         self._token: str | None = None
         self._minted_at = 0.0
 
@@ -111,9 +112,19 @@ class BedrockTokenAuth(httpx.Auth):
         if self._token is None or now - self._minted_at > self._TTL:
             from aws_bedrock_token_generator import provide_token
 
-            self._token = provide_token()
+            # The region is passed explicitly. `provide_token()` falls back to
+            # the AWS_REGION environment variable and raises without it, so
+            # leaving it out made the whole client depend on a variable that
+            # happened to be set in an interactive shell. It was: the API
+            # server, started from a terminal, worked. A benchmark launched
+            # through `env PYTHONPATH= ...` did not, and failed all 150
+            # questions in four seconds with "Region must be provided".
+            #
+            # `mantle_region` is already a validated setting. Reading it from
+            # the environment as well was one source of truth too many.
+            self._token = provide_token(region=self._region)
             self._minted_at = now
-            logger.info("minted a Bedrock bearer token")
+            logger.info("minted a Bedrock bearer token for %s", self._region)
         return self._token
 
     def auth_flow(self, request: httpx.Request):
@@ -189,21 +200,28 @@ class MantleClient:
     ) -> None:
         self._config = config or settings()
 
+        # Dispatch on the resolved authentication, not on whether a base URL
+        # happens to be set. Branching on the URL made `llm_auth` unreachable
+        # for any explicit endpoint — including Mantle's own /v1 route, which
+        # then answered 401 with no credential attached at all.
+        auth_mode = self._config.resolved_llm_auth
+
         if client is not None:
             self._client = client
-        elif self._config.llm_auth == "bedrock_token":
+        elif auth_mode == "bedrock_token":
             # Mantle's /openai/v1 route. Bearer token from the AWS credential
             # chain, re-minted as it ages.
             self._client = httpx.Client(
                 base_url=self._config.base_url,
                 timeout=httpx.Timeout(self._config.request_timeout_seconds),
-                auth=BedrockTokenAuth(),
+                auth=BedrockTokenAuth(self._config.mantle_region),
             )
             logger.info("using bedrock token auth against %s", self._config.base_url)
-        elif self._config.uses_local_llm:
-            # A local or self-hosted OpenAI-compatible server. No SigV4: there
-            # are no AWS credentials to sign with, and signing a request nobody
-            # verifies buys nothing but latency and another way to fail.
+        elif auth_mode == "bearer":
+            # A local or self-hosted OpenAI-compatible server, or any provider
+            # taking a static key. No SigV4: there are no AWS credentials to
+            # sign with, and signing a request nobody verifies buys nothing but
+            # latency and another way to fail.
             headers = {}
             if self._config.llm_api_key:
                 headers["Authorization"] = f"Bearer {self._config.llm_api_key}"

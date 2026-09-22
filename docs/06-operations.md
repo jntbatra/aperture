@@ -243,6 +243,59 @@ Cost: roughly 355k tokens for 150 questions, 1.25M for the full 500.
 
 ---
 
+## API reference
+
+Everything the frontend uses, and everything a script can. There is deliberately
+no endpoint that accepts raw SQL — the agent writes every statement that reaches
+the database, and adding a passthrough would make the validator optional.
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/api/health` | Model in use, table count, whether the database answered |
+| `GET` | `/api/schema` | Tables and columns, as reflected |
+| `GET` | `/api/schema/graph` | Tables and foreign keys, for the graph view |
+| `GET` | `/api/options` | The quality toggles: labels, help, costs, choices, defaults |
+| `POST` | `/api/ask` | Ask a question. Returns the answer, the SQL, the rows and the trace |
+| `POST` | `/api/ask/stream` | The same, as Server-Sent Events, so the UI can show progress |
+| `GET` | `/api/conversations` | Threads, newest first |
+| `GET` | `/api/conversations/{conversation_id}` | One thread with its turns and their stored results |
+| `DELETE` | `/api/conversations/{conversation_id}` | Delete a thread and its turns |
+| `GET` | `/api/search?q=` | Past questions matching a substring, with the thread each belongs to |
+| `GET` | `/api/stats` | Totals: asked, answered, asked back, mean latency, tokens |
+| `GET` | `/api/drift` | Recent questions against earlier ones, with p-values |
+| `GET` | `/api/suggestions` | Opening questions for an empty screen |
+| `GET` | `/api/datasets` | Uploaded CSV / Excel / dump datasets |
+| `POST` | `/api/datasets` | Upload one; returns the id to pass as `dataset_id` |
+| `DELETE` | `/api/datasets/{dataset_id}` | Remove an uploaded dataset and its database |
+
+### What a client may and may not set
+
+`POST /api/ask` takes an `options` object, and it is an **allow-list**, enforced
+twice — once by the request model and again in `config.apply_overrides`. Only
+the quality toggles are in it.
+
+The database URL, the models, the row cap and the timeouts are not, and that is
+not an oversight. A client able to raise its own row limit or point the agent at
+another database would not be configuring a feature, it would be removing a
+control. A setting added to `Settings` is *not* remotely settable until someone
+deliberately adds it to `OVERRIDABLE`; a test asserts the three declarations of
+that list agree.
+
+Unrecognised fields are dropped rather than rejected. The caller is a browser,
+and failing a whole question because one field was unfamiliar is worse than
+ignoring it.
+
+### Asking against an uploaded dataset
+
+```bash
+curl -F file=@sales.csv http://localhost:8000/api/datasets
+curl -X POST http://localhost:8000/api/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "which region sold most?", "dataset_id": "95b1bafc24a4"}'
+```
+
+---
+
 ## Grading the answers, not just the SQL
 
 ```bash

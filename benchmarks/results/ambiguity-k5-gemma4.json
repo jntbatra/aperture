@@ -1,0 +1,730 @@
+{
+  "summary": {
+    "questions": 30,
+    "repeats": 5,
+    "stability": 1.0,
+    "stable": 30,
+    "unstable": 0,
+    "labelled": 30,
+    "agreement": 1.0,
+    "asks_when_vague": 1.0,
+    "asks_when_clear": 0.0,
+    "least_stable": []
+  },
+  "model": "google.gemma-4-31b",
+  "repeats": 5,
+  "results": [
+    {
+      "question": "Who are our best customers?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "How should 'best' be measured?"
+        ],
+        [
+          "How should 'best' be measured?"
+        ],
+        [
+          "How should 'best' be measured?"
+        ],
+        [
+          "How should 'best' be measured?"
+        ],
+        [
+          "How should 'best' be measured?"
+        ]
+      ]
+    },
+    {
+      "question": "How are we doing lately?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What metric defines 'how we are doing'?",
+          "What time period does 'lately' refer to?"
+        ],
+        [
+          "What metric defines 'how we are doing'?",
+          "What time period does 'lately' refer to?"
+        ],
+        [
+          "What metric defines 'how we are doing'?",
+          "What time period does 'lately' refer to?"
+        ],
+        [
+          "What metric defines 'how we are doing'?",
+          "What time period does 'lately' refer to?"
+        ],
+        [
+          "What metric defines 'how we are doing'?",
+          "What time period does 'lately' refer to?"
+        ]
+      ]
+    },
+    {
+      "question": "Show me the top items",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What measure defines 'top' items?"
+        ],
+        [
+          "What measure defines 'top' items?"
+        ],
+        [
+          "How should 'top' items be measured?"
+        ],
+        [
+          "How should 'top' items be measured?"
+        ],
+        [
+          "How should 'top' items be measured?"
+        ]
+      ]
+    },
+    {
+      "question": "Which kitchens are underperforming?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What measure defines 'underperforming'?",
+          "What time period should be analyzed?"
+        ],
+        [
+          "What measure defines 'underperforming'?",
+          "What time period should be analyzed?"
+        ],
+        [
+          "How should 'underperforming' be measured?"
+        ],
+        [
+          "What measure defines 'underperforming'?"
+        ],
+        [
+          "What measure defines 'underperforming'?"
+        ]
+      ]
+    },
+    {
+      "question": "What is our churn rate?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "How is churn measured?",
+          "Over what time period should churn be calculated?"
+        ],
+        [
+          "How is churn defined?",
+          "What time period should be used to calculate churn?"
+        ],
+        [
+          "How is churn measured?",
+          "Over what time period should churn be calculated?"
+        ],
+        [
+          "How is churn defined?",
+          "What time period should be used to calculate churn?"
+        ],
+        [
+          "How is churn measured?",
+          "Over what time period should churn be calculated?"
+        ]
+      ]
+    },
+    {
+      "question": "Are coupons working?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What does 'working' mean in this context?"
+        ],
+        [
+          "What does 'working' mean in this context?"
+        ],
+        [
+          "What does 'working' mean in this context?"
+        ],
+        [
+          "What does 'working' mean?"
+        ],
+        [
+          "What does 'working' mean in this context?"
+        ]
+      ]
+    },
+    {
+      "question": "Give me a summary of last month",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What metric should the summary focus on?"
+        ],
+        [
+          "What metric should the summary focus on?"
+        ],
+        [
+          "What metric should the summary focus on?"
+        ],
+        [
+          "What metric should the summary focus on?"
+        ],
+        [
+          "What metric should the summary focus on?"
+        ]
+      ]
+    },
+    {
+      "question": "Which items should we drop from the menu?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What criteria defines an item that should be dropped?"
+        ],
+        [
+          "What criteria defines an item that should be dropped?"
+        ],
+        [
+          "What criteria defines an item that should be dropped?"
+        ],
+        [
+          "What criteria defines an item that should be dropped?"
+        ],
+        [
+          "What criteria defines an item that should be dropped?"
+        ]
+      ]
+    },
+    {
+      "question": "How many repeat customers do we have?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What defines a 'repeat customer'?"
+        ],
+        [
+          "What defines a 'repeat customer'?"
+        ],
+        [
+          "What defines a 'repeat customer'?"
+        ],
+        [
+          "What defines a 'repeat customer'?"
+        ],
+        [
+          "What defines a 'repeat customer'?"
+        ]
+      ]
+    },
+    {
+      "question": "What is the average order size?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What does 'order size' refer to?"
+        ],
+        [
+          "What does 'order size' refer to?"
+        ],
+        [
+          "Does 'order size' refer to the total monetary value or the number of items per order?"
+        ],
+        [
+          "What does 'order size' refer to?"
+        ],
+        [
+          "What does 'order size' refer to?"
+        ]
+      ]
+    },
+    {
+      "question": "Compare this month to last month",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What metric should be compared?"
+        ],
+        [
+          "What metric should be compared?"
+        ],
+        [
+          "What metric should be compared?"
+        ],
+        [
+          "What metric should be compared?"
+        ],
+        [
+          "What metric should be compared?"
+        ]
+      ]
+    },
+    {
+      "question": "Who are the most loyal users?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "How should 'most loyal' be measured?"
+        ],
+        [
+          "How should 'most loyal' be measured?"
+        ],
+        [
+          "How should 'most loyal' be measured?"
+        ],
+        [
+          "How should 'most loyal' be measured?"
+        ],
+        [
+          "How should 'most loyal' be measured?"
+        ]
+      ]
+    },
+    {
+      "question": "Is delivery getting slower?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "How should 'slower' be measured?",
+          "What time period should be compared to determine the trend?"
+        ],
+        [
+          "How should 'slower' be measured?",
+          "What time period should be compared to determine the trend?"
+        ],
+        [
+          "How is 'slower' measured?",
+          "What time period should be compared to determine the trend?"
+        ],
+        [
+          "How should 'slower' be measured?",
+          "What time period should be compared to determine the trend?"
+        ],
+        [
+          "How should 'slower' be measured?",
+          "What time period should be compared to determine the trend?"
+        ]
+      ]
+    },
+    {
+      "question": "What went wrong yesterday?",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What constitutes something 'going wrong'?"
+        ],
+        [
+          "What constitutes 'going wrong'?"
+        ],
+        [
+          "What constitutes something 'going wrong'?"
+        ],
+        [
+          "What constitutes something 'going wrong'?"
+        ],
+        [
+          "What constitutes something 'going wrong'?"
+        ]
+      ]
+    },
+    {
+      "question": "Show me growth",
+      "expected": true,
+      "verdicts": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "asks": [
+        [
+          "What metric defines growth?",
+          "Over what time period should growth be measured?"
+        ],
+        [
+          "Growth in which metric?",
+          "Growth over what time period?"
+        ],
+        [
+          "What metric defines growth?",
+          "Over what time period should growth be measured?"
+        ],
+        [
+          "Growth in terms of what metric?",
+          "Growth over what time period?"
+        ],
+        [
+          "What metric defines growth?",
+          "Over what time period should growth be measured?"
+        ]
+      ]
+    },
+    {
+      "question": "How many orders were placed in June 2026?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "How many orders have status CANCELLED?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "List the 10 items with the highest number of order_items rows.",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "What is the total of orders.totalAmount for orders created in July 2026?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "How many distinct users placed at least one DELIVERED order?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "How many rows are in the coupon_usages table?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "What is the earliest createdAt in the orders table?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "How many rows are in the kitchen_profiles table?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "Count orders per status.",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "Which single item appears in the most order_items rows?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "How many users signed up in August 2026?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "What is the sum of quantity in order_items for DELIVERED orders?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "List every distinct value of orders.status.",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "How many orders used a coupon, counted from coupon_usages?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "question": "What is the maximum orders.totalAmount ever recorded?",
+      "expected": false,
+      "verdicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "asks": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    }
+  ]
+}

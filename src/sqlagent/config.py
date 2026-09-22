@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -506,7 +507,37 @@ class Settings(BaseSettings):
 
     @property
     def uses_local_llm(self) -> bool:
-        return bool(self.llm_base_url)
+        """Whether the completion endpoint is somewhere AWS credentials mean nothing.
+
+        Decided from the host, not from "was a URL set at all". The previous
+        version returned True for *any* explicit ``llm_base_url``, which made
+        ``llm_auth="sigv4"`` unreachable in combination with one: the client
+        took the local branch, attached no credential, and Mantle answered 401
+        "Missing 'authorization' or 'x-api-key' header". A setting whose value
+        is silently ignored is worse than one that does not exist.
+        """
+        if not self.llm_base_url:
+            return False
+        host = urlparse(self.llm_base_url).hostname or ""
+        return not (host.endswith(".amazonaws.com") or host.endswith(".api.aws"))
+
+    @property
+    def resolved_llm_auth(self) -> str:
+        """The authentication actually used, after one deliberate inference.
+
+        ``llm_auth`` defaults to ``sigv4``, which is right for Mantle and wrong
+        for a llama.cpp on localhost — signing a request nobody verifies buys
+        nothing but latency and another way to fail. So a non-AWS host left at
+        the default resolves to ``bearer``, which sends ``llm_api_key`` when
+        there is one and nothing when there is not.
+
+        Anything set explicitly is obeyed, including ``sigv4`` against a
+        non-AWS host: that is a strange thing to ask for, and not something
+        this should quietly override.
+        """
+        if self.llm_auth != "sigv4":
+            return self.llm_auth
+        return "bearer" if self.uses_local_llm else "sigv4"
 
     @property
     def base_url(self) -> str:

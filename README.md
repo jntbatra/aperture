@@ -193,6 +193,7 @@ sql-agent/
 │   ├── voting.py            Sample N times, keep the query that recurs (opt-in)
 │   ├── clarify.py           Ask, when a question has two defensible answers (opt-in)
 │   ├── report.py            Split a multi-part question, answer each (opt-in)
+│   ├── suggest.py           Opening questions for an empty screen, from the schema
 │   ├── config.py            Settings, validated at startup; per-request overrides
 │   ├── mcp_server.py        Offer the agent as MCP tools to another assistant
 │   ├── prompts.py           Every prompt, version-controlled

@@ -1,0 +1,803 @@
+{
+  "source": "benchmarks/results/gemma4-31b-judged.json",
+  "judge_model": "qwen.qwen3-coder-480b-a35b-instruct",
+  "answer_quality": {
+    "graded": 150,
+    "ungraded": 0,
+    "good": 133,
+    "quality": 0.8867,
+    "by_defect": {
+      "answers_question": 10,
+      "complete": 8,
+      "supported": 1
+    }
+  },
+  "verdicts": [
+    {
+      "question_id": 912,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 954,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 782,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1427,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 149,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 94,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 955,
+      "defects": [
+        "complete"
+      ],
+      "problem": "The answer explicitly states that results are incomplete and omits the remaining rows without providing the full set of years before 1975."
+    },
+    {
+      "question_id": 1531,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1030,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 112,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 753,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 159,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 792,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1189,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1220,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 201,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 268,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1133,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 89,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 220,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 230,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 565,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 586,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 5,
+      "defects": [
+        "answers_question"
+      ],
+      "problem": "The answer discusses virtual schools but the query filters for non-virtual schools (Virtual = 'F')"
+    },
+    {
+      "question_id": 1411,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 244,
+      "defects": [
+        "answers_question"
+      ],
+      "problem": "The answer discusses query results rather than addressing whether the molecule with the most double bonds is carcinogenic."
+    },
+    {
+      "question_id": 227,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 704,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 40,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 563,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 717,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 881,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 751,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 474,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1146,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1232,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1124,
+      "defects": [
+        "answers_question"
+      ],
+      "problem": "The answer lists players with high attacking work rate but does not address the question about players who tend to be attacking when their teammates were doing attack moves."
+    },
+    {
+      "question_id": 1098,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1153,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1141,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 352,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 128,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1381,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 775,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1500,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1486,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 694,
+      "defects": [
+        "complete"
+      ],
+      "problem": "The answer does not provide the actual text of the latest 10 comments as requested, instead giving vague descriptions of some comments"
+    },
+    {
+      "question_id": 1152,
+      "defects": [
+        "answers_question"
+      ],
+      "problem": "The answer provides the ratio of inpatient to outpatient treatment, but the question asked for the ratio of outpatient to inpatient treatment."
+    },
+    {
+      "question_id": 465,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1505,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1187,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 557,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 23,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 62,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 137,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 859,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 730,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 12,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 194,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 745,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 192,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 576,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1003,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 208,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 92,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 46,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 967,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1484,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 766,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 758,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 909,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 473,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1148,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 427,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 737,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 17,
+      "defects": [
+        "complete"
+      ],
+      "problem": "The answer only lists a few charter numbers without showing the complete ranking as requested"
+    },
+    {
+      "question_id": 379,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 72,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 685,
+      "defects": [
+        "answers_question"
+      ],
+      "problem": "The answer addresses the query results rather than answering the original question about total views and the user who posted last."
+    },
+    {
+      "question_id": 547,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 47,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1225,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 877,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1238,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1506,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 539,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 578,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1275,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 77,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1404,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1483,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 791,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1247,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 37,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1001,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1149,
+      "defects": [
+        "answers_question"
+      ],
+      "problem": "The answer addresses the wrong comparison, stating there were more outpatients when the question asks whether there were more in-patient or outpatient males, and the query logic suggests comparing counts directly rather than calculating a percentage deviation."
+    },
+    {
+      "question_id": 1493,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1084,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1198,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 415,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 587,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 137,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 633,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1251,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 226,
+      "defects": [
+        "answers_question"
+      ],
+      "problem": "The answer provides a percentage but the query logic suggests it should be calculating the percentage of non-double bonds rather than double bonds"
+    },
+    {
+      "question_id": 169,
+      "defects": [
+        "answers_question",
+        "complete"
+      ],
+      "problem": "The answer does not address the question asked and instead describes a failed attempt to write a query."
+    },
+    {
+      "question_id": 1205,
+      "defects": [
+        "supported"
+      ],
+      "problem": "The answer claims there is a mix of 'No' and 'Yes' values for patient 57266, but the query would only return one result per row since it's checking a specific patient ID, making the claim of mixed results inconsistent with how the query is structured."
+    },
+    {
+      "question_id": 740,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 407,
+      "defects": [
+        "complete"
+      ],
+      "problem": "The answer claims there are 472 more rows but the query has a limit of 100000 which would show all results if there were only 472 total"
+    },
+    {
+      "question_id": 1409,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1039,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 25,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 915,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 945,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1058,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1166,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1150,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 687,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 234,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 206,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1088,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 847,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1507,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 136,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 866,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 528,
+      "defects": [
+        "complete"
+      ],
+      "problem": "The answer does not list all the cards from the set as requested, only mentioning a few examples"
+    },
+    {
+      "question_id": 1241,
+      "defects": [
+        "answers_question",
+        "complete"
+      ],
+      "problem": "The answer discusses what the query did not provide rather than answering the actual question about patient counts"
+    },
+    {
+      "question_id": 1472,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 738,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1479,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1029,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1136,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 480,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1078,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1048,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 960,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 414,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1501,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 341,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1252,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 892,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1231,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 100,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 469,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 568,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1042,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 592,
+      "defects": [],
+      "problem": ""
+    },
+    {
+      "question_id": 1011,
+      "defects": [
+        "answers_question"
+      ],
+      "problem": "The answer provides only one name when the question asks for full names and doesn't specify which top 20 driver achieved the record."
+    },
+    {
+      "question_id": 1135,
+      "defects": [
+        "complete"
+      ],
+      "problem": "The answer does not provide the top four players as requested, only one player ID."
+    },
+    {
+      "question_id": 573,
+      "defects": [],
+      "problem": ""
+    }
+  ]
+}
