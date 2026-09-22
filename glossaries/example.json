@@ -1,0 +1,76 @@
+{
+  "_comment": [
+    "Domain facts about the production database that its schema cannot express.",
+    "",
+    "Every entry here was verified against the live database, not guessed.",
+    "The money entries exist because revenue was reported as Rs 1,234,500 when",
+    "the true figure was Rs 12,345: order_items.price stores paise, and nothing",
+    "in the schema says so (the column is an integer named 'price').",
+    "",
+    "Verification: order_items rows for 'a sample dish' hold price = 12500 and",
+    "18000 for a dish that costs Rs 125 and Rs 180.",
+    "",
+    "Point SQLAGENT_GLOSSARY_PATH at this file to load it.",
+    "The coupon entries exist because both a human and the agent independently reached for orders.couponCode, which is populated on a small minority of orders. The real signal is coupon_usages, which covers far more. Verified by counting both."
+  ],
+  "columns": [
+    {
+      "column": "order_items.price",
+      "note": "stored in paise (1/100 rupee). 12500 means Rs 125.00. Divide by 100 before reporting, and report in rupees (Rs / INR), never dollars."
+    },
+    {
+      "column": "order_items.originalPrice",
+      "note": "stored in paise, like price. Divide by 100 before reporting."
+    },
+    {
+      "column": "orders.totalAmount",
+      "note": "stored in paise. Divide by 100 before reporting, in rupees."
+    },
+    {
+      "column": "orders.platformFee",
+      "note": "stored in paise. Divide by 100 before reporting, in rupees."
+    },
+    {
+      "column": "items.isVegetarian",
+      "note": "boolean. TRUE for vegetarian items. Never infer diet from an item's name - 'Grilled Chicken Bowl' and 'Chicken Tikka Roll' are both FALSE, and several paneer dishes are the only reliable way to tell."
+    },
+    {
+      "column": "orders.couponCode",
+      "note": "populated on only a small minority of orders - NOT a reliable indicator of whether a coupon was used. Use the coupon_usages table instead."
+    }
+  ],
+  "terms": [
+    {
+      "word": "ordered",
+      "meaning": "order_items - items in placed orders. Never cart_items, which is what people put in a basket and may never have bought. The two give different answers to the same question."
+    },
+    {
+      "word": "delivered",
+      "meaning": "orders.status = 'DELIVERED'"
+    },
+    {
+      "word": "veg / vegetarian",
+      "meaning": "items.isVegetarian = TRUE"
+    },
+    {
+      "word": "used a coupon / with a coupon",
+      "meaning": "a row exists in coupon_usages for that order: EXISTS (SELECT 1 FROM coupon_usages cu WHERE cu.\"orderId\" = orders.id). Do not test orders.couponCode, which is mostly NULL even for orders that did use a coupon."
+    }
+  ],
+  "metrics": [
+    {
+      "name": "revenue",
+      "expression": "SUM(order_items.price * order_items.quantity) / 100.0",
+      "note": "in rupees; the division converts from paise"
+    },
+    {
+      "name": "units sold",
+      "expression": "SUM(order_items.quantity)",
+      "note": "not COUNT(*), which counts order lines rather than items"
+    },
+    {
+      "name": "order count",
+      "expression": "COUNT(DISTINCT orders.id)"
+    }
+  ]
+}

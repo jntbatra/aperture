@@ -1,0 +1,68 @@
+[project]
+name = "sqlagent"
+version = "0.1.0"
+description = "Conversational SQL analyst agent: natural-language questions over a relational database"
+requires-python = ">=3.12"
+dependencies = [
+    # Schema introspection. SQLAlchemy's reflection API reads the database's
+    # own catalog, so we never parse CREATE TABLE text ourselves and the same
+    # code works across Postgres/MySQL/Snowflake.
+    "sqlalchemy>=2.0.36",
+    "psycopg[binary]>=3.2.3",
+    # Schema graph. Tables are nodes, foreign keys are edges; retrieval is a
+    # bounded breadth-first walk over this graph.
+    "networkx>=3.4.2",
+    # SQL parsing/validation. Used to prove a generated statement is read-only
+    # before it reaches the database, and to normalise SQL for cache keys.
+    "sqlglot>=26.0.0",
+    # Settings loaded from environment/.env with type validation.
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    # Orchestration. The request pipeline is a LangGraph state graph: nodes are
+    # the steps, and the two repair loops are conditional edges out of one
+    # decision function. See src/sqlagent/agent_graph.py.
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    # Model Context Protocol server, so another assistant can ask this agent
+    # questions without ever being handed database credentials. See
+    # src/sqlagent/mcp_server.py.
+    "mcp>=2.0.0",
+    # Mints short-lived bearer tokens from the AWS credential chain. Mantle's
+    # /openai/v1 route rejects SigV4 and wants one of these instead.
+    "aws-bedrock-token-generator>=1.1.0",
+    # HTTP client for the model endpoint, and the web API.
+    "httpx>=0.28.0",
+    "boto3>=1.35.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sqlagent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Integration tests need a live Postgres; they are skipped automatically when
+# SQLAGENT_TEST_DATABASE_URL is unset, so `pytest` works on a bare checkout.
+markers = [
+    "integration: requires a live Postgres instance",
+]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

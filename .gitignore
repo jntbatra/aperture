@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local configuration. Never commit real credentials; .env.example is the
+# template that IS committed.
+.env
+.env.local
+
+# Node / frontend
+node_modules/
+frontend/dist/
+
+# Benchmark data is large and re-downloadable
+benchmarks/downloads/
+
+# Local runtime state. The history database holds real questions asked against
+# a real business database, and an uploaded dataset is someone's data — neither
+# is source, and neither belongs in a repository.
+data/sqlagent.db
+data/datasets/
