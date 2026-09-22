@@ -134,3 +134,89 @@ Both, as chosen:
 
 The existing `dataset_id` split is the right shape for this. It becomes
 tenant-scoped rather than global.
+
+---
+
+## The design language
+
+Taken from `jntbatra/unilink` (private, Next.js + shadcn/ui "new-york" +
+Prisma/Neon), intermingled with Aperture's existing system rather than
+replacing it.
+
+### What came from where
+
+**Structure from Unilink.** shadcn's token *names* — `--background`,
+`--foreground`, `--primary`, `--muted-foreground`, the full `--sidebar-*` set,
+`--chart-1..5`, `--radius: 0.65rem`, the `.dark` class variant.
+
+That is the load-bearing decision. It means any shadcn component drops in
+unmodified, a designer moving between the two products reads one vocabulary,
+and the Unilink dashboard and the Aperture console can share a component
+library later without a translation layer. A third naming scheme would have
+made that impossible for no gain.
+
+**Warmth from Aperture.** Unilink's neutrals are zinc, hue 285, cool. Aperture's
+are hue ~85, warm paper. Adopting shadcn's palette wholesale would have
+produced a generic dashboard, and the warm paper is what stops a text-heavy
+analyst tool from reading like a spreadsheet. Instrument Serif stays for display
+type for the same reason.
+
+### The primary, measured rather than eyeballed
+
+Both palettes were converted sRGB -> OKLab -> OKLCH rather than matched by eye:
+
+| | OKLCH | |
+|---|---|---|
+| Unilink primary | `oklch(0.705 0.213 47.6)` | bright orange |
+| Aperture clay | `oklch(0.567 0.136 35.6)` | muted terracotta |
+| **SaaS primary** | **`oklch(0.620 0.170 40.0)`** | Aperture's hue, Unilink's energy |
+
+Same hue family — that was luck, and it is why the two blend rather than clash.
+The SaaS surface sits between them because a product with pricing and
+onboarding needs a call to action that carries further than an accent used
+three times on a page of prose.
+
+OKLCH throughout, not hex: lightness is perceptual, so contrast can be checked
+by reading the first number and a dark variant is a lightness change rather
+than a fresh guess.
+
+### Dark mode
+
+Aperture had none. Unilink does, and a tool analysts leave open on a second
+monitor needs one.
+
+Not an inversion — surfaces *lift*: the background is a warm near-black and
+cards sit above it, which is how depth reads without shadows. Borders become
+low-alpha white so they stay correct over any surface lightness. The primary
+gets brighter, because a mid-lightness accent that reads as confident on paper
+disappears against dark.
+
+Three states, not two: `light`, `dark`, `system`. Collapsing to a boolean makes
+the first click pin the user to whichever theme they happened to be seeing, and
+leaves "go back to following my desktop" with no gesture.
+
+Applied by a blocking script in `index.html` before React mounts. React mounting
+is asynchronous, so a theme applied in an effect arrives one paint late and
+every load flashes white.
+
+### Migration without a rewrite
+
+Aperture's CSS names colours after what they are made of (`--paper`, `--ink`,
+`--clay`); shadcn names them after what they do. Rather than find-and-replace
+across 1,400 lines of working CSS, the old names became aliases onto the new
+ones. Every existing rule keeps working and gets dark mode for free.
+
+All 17 remaining hardcoded colours were tokenised. One of them was a bug this
+introduced and the browser check caught: `color: var(--muted, #6b7280)` in the
+Drift panel. In shadcn `--muted` is a *surface*, not text — the moment the token
+started existing, that label became near-white on white. The text token is
+`--muted-foreground`.
+
+### What was deliberately not taken
+
+Unilink's domain — `Workspace`, `Folder`, `Video`, `Member`, `Invite`,
+`College` — is a different product. Its `Subscription` model is worth copying
+structurally when billing lands (`SUBSCRIPTION_PLAN` FREE/PRO/ENTERPRISE,
+Stripe `customerId`/`priceId`/`status`/period bounds, `cancelAtPeriodEnd`), and
+its `Member` + `WorkspaceMemberRole` shape is close to what tenant seats will
+need. Noted for #59 and the billing work, not imported now.

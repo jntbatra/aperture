@@ -1,0 +1,252 @@
+/* ==========================================================================
+   The SaaS design language.
+
+   Two systems meeting
+   -------------------
+   Unilink (Next.js, shadcn/ui "new-york", Geist, orange primary) supplies the
+   *structure*: the token names, the sidebar set, the `.dark` variant, the
+   chart ramp, `--radius: 0.65rem`. Aperture supplies the *warmth*: paper
+   rather than white, a clay accent, and a serif for display type.
+
+   Taking the names from shadcn is the load-bearing decision. It means any
+   shadcn component drops in unmodified, a designer moving between the two
+   products is looking at one vocabulary, and the Unilink dashboard and the
+   Aperture console can share a component library later without a translation
+   layer in the middle. Inventing a third naming scheme would make that
+   impossible for no gain.
+
+   Taking the values from Aperture is the other half. Unilink's neutrals are
+   zinc — hue 285, cool. Aperture's are hue ~85, warm. Adopting shadcn's
+   palette wholesale would have produced a generic dashboard, and the warm
+   paper is the thing that stops a text-heavy analyst tool from reading like a
+   spreadsheet.
+
+   The primary, measured rather than eyeballed
+   -------------------------------------------
+       Unilink primary   oklch(0.705 0.213 47.6)   bright orange
+       Aperture clay     oklch(0.567 0.136 35.6)   muted terracotta
+
+   Same hue family. Unilink is lighter and roughly 1.6x the chroma. The SaaS
+   primary sits between them: Aperture's hue, lifted toward Unilink's energy,
+   because a product surface with pricing and onboarding needs a call to action
+   that carries further than an accent used three times on a page of prose.
+
+   Why OKLCH and not hex
+   ---------------------
+   Lightness in OKLCH is perceptual, so `--primary` and `--primary-foreground`
+   can be checked for contrast by reading the first number, and a dark-mode
+   variant is a lightness change rather than a fresh guess. The same two hex
+   codes that look balanced in light mode rarely are when inverted.
+
+   Every value below is the output of an sRGB -> OKLab -> OKLCH conversion of
+   the existing palette, not an approximation typed by hand.
+   ========================================================================== */
+
+:root {
+  /* shadcn's scale, one notch tighter than Aperture's 10px. Unilink's value,
+     kept because the component library is built around it. */
+  --radius: 0.65rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* ---- Surfaces -------------------------------------------------------
+     Warm, hue ~90, not shadcn's neutral white. This is the single most
+     visible place the two systems differ and the one worth keeping. */
+  --background: oklch(0.985 0.004 91.4);        /* paper */
+  --foreground: oklch(0.214 0.004 84.6);        /* ink */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.214 0.004 84.6);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.214 0.004 84.6);
+
+  /* ---- Primary --------------------------------------------------------
+     Between clay and Unilink's orange. Hue from Aperture, energy from
+     Unilink. */
+  --primary: oklch(0.620 0.170 40.0);
+  --primary-foreground: oklch(0.985 0.012 80.0);
+
+  --secondary: oklch(0.961 0.008 91.5);         /* paper-sunk */
+  --secondary-foreground: oklch(0.214 0.004 84.6);
+  --muted: oklch(0.961 0.008 91.5);
+  --muted-foreground: oklch(0.437 0.012 81.8);  /* ink-soft */
+  --accent: oklch(0.952 0.016 42.4);            /* clay-wash */
+  --accent-foreground: oklch(0.489 0.121 35.5); /* clay-deep */
+
+  --destructive: oklch(0.496 0.141 29.5);
+  --destructive-foreground: oklch(0.985 0.004 91.4);
+  --success: oklch(0.480 0.075 163.8);
+  --warning: oklch(0.536 0.107 67.5);
+
+  --border: oklch(0.911 0.016 86.4);            /* line */
+  --input: oklch(0.911 0.016 86.4);
+  --ring: oklch(0.620 0.170 40.0);
+
+  /* ---- Charts ---------------------------------------------------------
+     Five steps that stay distinguishable in greyscale and to the ~8% of men
+     with red-green colour blindness: the ramp moves in lightness as well as
+     hue, so it does not rely on hue alone to separate two series. */
+  --chart-1: oklch(0.620 0.170 40.0);
+  --chart-2: oklch(0.560 0.090 195.0);
+  --chart-3: oklch(0.480 0.075 163.8);
+  --chart-4: oklch(0.700 0.130 67.5);
+  --chart-5: oklch(0.430 0.080 285.0);
+
+  /* ---- Sidebar --------------------------------------------------------
+     A separate token set, straight from Unilink. It exists because a sidebar
+     is not "a card that happens to be on the left": it stays put while the
+     content scrolls, and it needs to recede in light mode and lead in dark
+     mode. One set of surface tokens cannot express both. */
+  --sidebar: oklch(0.961 0.008 91.5);
+  --sidebar-foreground: oklch(0.214 0.004 84.6);
+  --sidebar-primary: oklch(0.620 0.170 40.0);
+  --sidebar-primary-foreground: oklch(0.985 0.012 80.0);
+  --sidebar-accent: oklch(0.952 0.016 42.4);
+  --sidebar-accent-foreground: oklch(0.489 0.121 35.5);
+  --sidebar-border: oklch(0.911 0.016 86.4);
+  --sidebar-ring: oklch(0.620 0.170 40.0);
+
+  /* ---- Type -----------------------------------------------------------
+     Geist for UI, from Unilink. Instrument Serif kept for display, because it
+     is the one thing that makes this look like a considered product rather
+     than a dashboard template, and dropping it to match would be adopting the
+     other system's weaknesses along with its strengths. */
+  --font-sans: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  --font-display: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+
+  --nav-breakpoint: 900px;
+}
+
+/* ==========================================================================
+   Dark mode.
+
+   Aperture had none. Unilink does, and a product people keep open all day
+   needs one — this is a tool analysts leave on a second monitor.
+
+   Not an inversion. Surfaces lift rather than flip: the background is a warm
+   near-black and cards sit *above* it, which is how depth reads without
+   shadows. Borders become low-alpha white (Unilink's approach) rather than a
+   fixed grey, so they stay correct over any surface lightness.
+
+   The primary gets brighter, not darker. A mid-lightness accent that reads as
+   confident on paper disappears against a dark background.
+   ========================================================================== */
+
+.dark {
+  --background: oklch(0.180 0.006 85.0);
+  --foreground: oklch(0.970 0.004 91.0);
+  --card: oklch(0.235 0.006 85.0);
+  --card-foreground: oklch(0.970 0.004 91.0);
+  --popover: oklch(0.235 0.006 85.0);
+  --popover-foreground: oklch(0.970 0.004 91.0);
+
+  --primary: oklch(0.700 0.180 42.0);
+  --primary-foreground: oklch(0.200 0.030 45.0);
+
+  --secondary: oklch(0.285 0.007 85.0);
+  --secondary-foreground: oklch(0.970 0.004 91.0);
+  --muted: oklch(0.285 0.007 85.0);
+  --muted-foreground: oklch(0.700 0.012 85.0);
+  --accent: oklch(0.320 0.035 40.0);
+  --accent-foreground: oklch(0.880 0.070 45.0);
+
+  --destructive: oklch(0.660 0.170 27.0);
+  --destructive-foreground: oklch(0.970 0.004 91.0);
+  --success: oklch(0.680 0.110 163.0);
+  --warning: oklch(0.760 0.140 70.0);
+
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.700 0.180 42.0);
+
+  --chart-1: oklch(0.700 0.180 42.0);
+  --chart-2: oklch(0.700 0.120 195.0);
+  --chart-3: oklch(0.680 0.110 163.0);
+  --chart-4: oklch(0.800 0.140 70.0);
+  --chart-5: oklch(0.650 0.130 285.0);
+
+  --sidebar: oklch(0.235 0.006 85.0);
+  --sidebar-foreground: oklch(0.970 0.004 91.0);
+  --sidebar-primary: oklch(0.700 0.180 42.0);
+  --sidebar-primary-foreground: oklch(0.200 0.030 45.0);
+  --sidebar-accent: oklch(0.320 0.035 40.0);
+  --sidebar-accent-foreground: oklch(0.880 0.070 45.0);
+  --sidebar-border: oklch(1 0 0 / 11%);
+  --sidebar-ring: oklch(0.700 0.180 42.0);
+}
+
+/* ==========================================================================
+   Bridge to the existing stylesheet.
+
+   Aperture's CSS names colours after what they are made of — `--paper`,
+   `--ink`, `--clay`. shadcn names them after what they do — `--background`,
+   `--foreground`, `--primary`. Both are defensible and the second wins here,
+   because it is the one a component library can be written against.
+
+   Rather than a find-and-replace across 1,400 lines of working CSS, the old
+   names are redefined as aliases. Two consequences, both wanted:
+
+     - every existing rule keeps working, unchanged
+     - all of them follow dark mode for free, because the alias resolves to a
+       token that changed
+
+   New code uses the shadcn names. These aliases are a migration path, not a
+   second vocabulary to choose from.
+   ========================================================================== */
+
+:root,
+.dark {
+  --paper: var(--background);
+  --paper-sunk: var(--secondary);
+  --surface: var(--card);
+
+  --ink: var(--foreground);
+  --ink-soft: var(--muted-foreground);
+  --ink-faint: color-mix(in oklch, var(--muted-foreground) 70%, var(--background));
+
+  --line: var(--border);
+  --line-strong: color-mix(in oklch, var(--border) 65%, var(--foreground));
+
+  --clay: var(--primary);
+  --clay-deep: var(--accent-foreground);
+  --clay-wash: var(--accent);
+
+  --green: var(--success);
+  --green-wash: color-mix(in oklch, var(--success) 12%, var(--background));
+  --amber: var(--warning);
+  --amber-wash: color-mix(in oklch, var(--warning) 12%, var(--background));
+  --red: var(--destructive);
+  --red-wash: color-mix(in oklch, var(--destructive) 12%, var(--background));
+
+  --font-ui: var(--font-sans);
+}
+
+/* Shadows carry almost nothing; borders do the structural work. In dark mode
+   they do even less, because a shadow over a near-black surface is invisible
+   and the lifted card lightness already reads as depth. */
+:root {
+  --shadow-sm: 0 1px 2px oklch(0.214 0.004 84.6 / 4%);
+  --shadow: 0 4px 16px oklch(0.214 0.004 84.6 / 6%);
+  --shadow-lg: 0 12px 40px oklch(0.214 0.004 84.6 / 10%);
+}
+
+.dark {
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 30%);
+  --shadow: 0 4px 16px oklch(0 0 0 / 40%);
+  --shadow-lg: 0 12px 40px oklch(0 0 0 / 55%);
+}
+
+/* The theme is switched by a class on <html>, not by a media query alone.
+   `prefers-color-scheme` is the right default and the wrong final answer: a
+   user who wants the light theme on a dark desktop must be able to say so,
+   and that preference has to survive a reload. The class is set from stored
+   preference at boot; the media query only supplies the initial value. */
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}

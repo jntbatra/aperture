@@ -32,7 +32,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 16px 24px;
-  background: rgba(251, 250, 247, 0.82);
+  background: color-mix(in oklch, var(--background) 82%, transparent);
   backdrop-filter: saturate(140%) blur(12px);
   border-bottom: 1px solid var(--line);
 }
@@ -536,7 +536,7 @@ td.is-null {
   position: fixed;
   inset: 0;
   z-index: 35;
-  background: rgba(26, 25, 23, 0.18);
+  background: oklch(0 0 0 / 28%);
   animation: fade 0.26s var(--ease);
 }
 
@@ -649,7 +649,7 @@ td.is-null {
 }
 
 .notice--error {
-  border-color: #f0cec7;
+  border-color: color-mix(in oklch, var(--primary) 30%, var(--accent));
   background: var(--red-wash);
   color: var(--red);
 }
@@ -784,7 +784,7 @@ td.is-null {
 .gnode--on {
   border-color: var(--clay);
   background: var(--clay-wash);
-  box-shadow: 0 0 0 3px rgba(184, 84, 58, 0.12);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 14%, transparent);
 }
 
 .gnode__name {
@@ -817,7 +817,7 @@ td.is-null {
   padding: 5px 10px;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: rgba(251, 250, 247, 0.9);
+  background: color-mix(in oklch, var(--background) 90%, transparent);
   backdrop-filter: blur(6px);
   font-size: 11px;
   color: var(--ink-faint);
@@ -1213,7 +1213,7 @@ td.is-null {
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.12));
+  box-shadow: var(--shadow-lg);
 }
 
 .toggles__head {
@@ -1309,7 +1309,7 @@ td.is-null {
   height: 16px;
   border-radius: 50%;
   background: var(--surface);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-sm);
   transition: transform 0.15s var(--ease);
 }
 
@@ -1358,10 +1358,10 @@ td.is-null {
 
 .caution {
   padding: 11px 14px;
-  border: 1px solid var(--warn-line, #e0c9a0);
+  border: 1px solid color-mix(in oklch, var(--warning) 45%, var(--border));
   border-left-width: 3px;
   border-radius: var(--radius-sm, 8px);
-  background: var(--warn-wash, #fdf6e9);
+  background: color-mix(in oklch, var(--warning) 12%, var(--background));
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--ink);
@@ -1436,7 +1436,7 @@ td.is-null {
   margin: 0 0 12px;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--muted, #6b7280);
+  color: var(--muted-foreground);
 }
 
 .drift__shifts {
@@ -1462,13 +1462,13 @@ td.is-null {
 }
 
 .drift__shift--worse {
-  background: rgba(220, 38, 38, 0.06);
-  border-left-color: #dc2626;
+  background: color-mix(in oklch, var(--destructive) 8%, transparent);
+  border-left-color: var(--destructive);
 }
 
 .drift__shift--better {
-  background: rgba(22, 163, 74, 0.06);
-  border-left-color: #16a34a;
+  background: color-mix(in oklch, var(--success) 10%, transparent);
+  border-left-color: var(--success);
 }
 
 .drift__metric {
@@ -1486,14 +1486,14 @@ td.is-null {
 .drift__p {
   display: block;
   font-size: 11px;
-  color: var(--muted, #6b7280);
+  color: var(--muted-foreground);
 }
 
 .drift__rates {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  color: var(--muted, #6b7280);
+  color: var(--muted-foreground);
 }
 
 .drift__rates td {
@@ -1510,5 +1510,48 @@ td.is-null {
   margin: 12px 0 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--muted, #6b7280);
+  color: var(--muted-foreground);
+}
+
+/* --------------------------------------------------------------------------
+   Theme toggle
+   --------------------------------------------------------------------------
+   A segmented control. Three options sharing one track reads as "pick one of
+   these", which is what it is; three separate buttons would read as three
+   independent actions.
+   -------------------------------------------------------------------------- */
+
+.theme-toggle {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--secondary);
+}
+
+.theme-toggle__option {
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: calc(var(--radius-md) - 2px);
+  cursor: pointer;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+}
+
+.theme-toggle__option:hover {
+  color: var(--foreground);
+}
+
+/* The selected option is raised onto the card surface rather than tinted with
+   the accent. The accent is the call to action on this page; spending it on a
+   preference control makes the thing that matters compete with the thing that
+   does not. */
+.theme-toggle__option--on {
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-sm);
 }

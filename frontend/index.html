@@ -5,6 +5,24 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Aperture — ask your database anything</title>
+    <!-- Applied before the first paint, deliberately blocking. React mounts
+         asynchronously, so a theme applied in an effect arrives one paint too
+         late and every load flashes white before going dark. This runs in
+         under a millisecond and is the only place that flash is fixable. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('aperture.theme');
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (_) {
+          /* private browsing: fall through to the light default */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

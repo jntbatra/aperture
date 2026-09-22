@@ -35,6 +35,7 @@ import {
 } from './api';
 import { Drift } from './components/Drift';
 import { Sidebar } from './components/Sidebar';
+import { ThemeToggle } from './components/ThemeToggle';
 import { Toggles, loadOptions } from './components/Toggles';
 import { Transcript, type Exchange } from './components/Transcript';
 
@@ -348,6 +349,7 @@ export default function App() {
               chat {threadId}
             </button>
           )}
+          <ThemeToggle />
           <Toggles options={options} onChange={setOptions} disabled={busy} />
           <button
             className="ghost-button"
