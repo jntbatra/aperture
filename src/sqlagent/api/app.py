@@ -100,7 +100,7 @@ class AskOptions(BaseModel):
     """How far to walk the foreign-key graph when choosing which tables to show."""
 
     max_hops: int | None = Field(default=None, ge=0, le=4)
-    quality_tier: Literal["fast", "thorough"] | None = None
+    quality_tier: Literal["fast", "medium", "thorough"] | None = None
     use_critic: bool | None = None
     vote_samples: int | None = Field(default=None, ge=1, le=7)
     prescreen_input: bool | None = None
@@ -351,13 +351,15 @@ TOGGLE_DESCRIPTIONS: list[ToggleInfo] = [
         name="quality_tier",
         label="Care",
         help=(
-            "Thorough writes the query three times and keeps the version that "
-            "recurs, then has a second model check it answers the question. For "
-            "a figure that will be acted on rather than glanced at."
+            "Fast answers most questions correctly in one go. Medium writes "
+            "the query three times and keeps the version that recurs, which "
+            "helps where the model is guessing. Detailed adds a second model "
+            "reviewing the query and splits a multi-part question into parts — "
+            "for a figure that will be acted on rather than glanced at."
         ),
-        cost="~3x slower, ~4x the tokens",
+        cost="medium ~2x the tokens; detailed ~4x and several times slower",
         kind="choice",
-        choices=["fast", "thorough"],
+        choices=["fast", "medium", "thorough"],
     ),
     ToggleInfo(
         name="use_critic",
@@ -1175,6 +1177,61 @@ def suggestions(agent: AgentDep) -> SuggestionsResponse:
 def stats() -> dict:
     """Aggregate numbers across every question ever asked."""
     return get_store().stats()
+
+
+class PlanResponse(BaseModel):
+    """One tier, as the pricing page needs it.
+
+    Served rather than hardcoded in the client. The numbers are pricing policy
+    and they live in `saas/plans.py`; a second copy in a React component is a
+    copy that will disagree with billing on the day one of them changes.
+    """
+
+    name: str
+    label: str
+    price_monthly_usd: int
+    price_monthly_inr: int
+    custom_priced: bool
+    """True means "talk to us", not "free". Zero means both in the table, and
+    the difference must not be left to whoever writes the template."""
+
+    questions_per_month: int
+    detailed_per_month: int
+    max_quality_tier: str
+    strong_model: bool
+    max_connected_databases: int
+    max_uploaded_datasets: int
+    max_seats: int
+    row_limit: int
+    history_retention_days: int
+    features: list[str]
+
+
+@app.get("/api/plans", response_model=list[PlanResponse])
+def plans() -> list[PlanResponse]:
+    """The tiers. Public: a pricing page is read before anyone has an account."""
+    from sqlagent.saas.plans import CUSTOM_PRICED, PLANS
+
+    return [
+        PlanResponse(
+            name=plan.name,
+            label=plan.label,
+            price_monthly_usd=plan.price_monthly_usd,
+            price_monthly_inr=plan.price_monthly_inr,
+            custom_priced=plan.name in CUSTOM_PRICED,
+            questions_per_month=plan.questions_per_month,
+            detailed_per_month=plan.detailed_per_month,
+            max_quality_tier=plan.max_quality_tier,
+            strong_model=plan.strong_model,
+            max_connected_databases=plan.max_connected_databases,
+            max_uploaded_datasets=plan.max_uploaded_datasets,
+            max_seats=plan.max_seats,
+            row_limit=plan.row_limit,
+            history_retention_days=plan.history_retention_days,
+            features=sorted(plan.features),
+        )
+        for plan in PLANS.values()
+    ]
 
 
 @app.get("/api/drift", response_model=DriftResponse)

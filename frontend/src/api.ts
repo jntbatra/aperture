@@ -159,7 +159,7 @@ export interface SearchHit {
 export interface AskOptions {
   initial_hops?: number;
   max_hops?: number;
-  quality_tier?: 'fast' | 'thorough';
+  quality_tier?: 'fast' | 'medium' | 'thorough';
   use_critic?: boolean;
   vote_samples?: number;
   prescreen_input?: boolean;
@@ -338,6 +338,32 @@ export interface DriftReport {
   rates: Record<string, [number, number]>;
   summary: string;
 }
+
+/** One pricing tier, as served by `GET /api/plans`.
+ *
+ *  `-1` means unlimited. The server sends the sentinel rather than the string
+ *  "unlimited" so that every other consumer can still compare numbers. */
+export interface PlanInfo {
+  name: 'FREE' | 'PRO' | 'ENTERPRISE';
+  label: string;
+  price_monthly_usd: number;
+  price_monthly_inr: number;
+  /** True means "talk to us", not "free". Zero price means both in the table,
+   *  which is why this is a flag and not something to infer. */
+  custom_priced: boolean;
+  questions_per_month: number;
+  detailed_per_month: number;
+  max_quality_tier: 'fast' | 'medium' | 'thorough';
+  strong_model: boolean;
+  max_connected_databases: number;
+  max_uploaded_datasets: number;
+  max_seats: number;
+  row_limit: number;
+  history_retention_days: number;
+  features: string[];
+}
+
+export const getPlans = () => json<PlanInfo[]>('/api/plans');
 
 export const getDrift = (recent = 100, baseline = 300) =>
   json<DriftReport>(`/api/drift?recent=${recent}&baseline=${baseline}`);

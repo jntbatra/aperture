@@ -157,7 +157,13 @@ const FOLLOW_UPS = [
   'Why might that be?',
 ];
 
-export default function App() {
+type AppProps = {
+  /** Leave the console for the marketing pages. Optional so the component can
+   *  still be mounted on its own in a test or a storybook. */
+  onExit?: () => void;
+};
+
+export default function App({ onExit }: AppProps = {}) {
   const [question, setQuestion] = useState('');
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
@@ -361,6 +367,11 @@ export default function App() {
           <button className="ghost-button" onClick={startNewThread} disabled={empty && !threadId}>
             New chat
           </button>
+          {onExit && (
+            <button className="ghost-button" onClick={onExit}>
+              Plans
+            </button>
+          )}
           <button
             className="ghost-button"
             aria-pressed={drawerOpen}

@@ -51,7 +51,13 @@ import networkx as nx
 from sqlalchemy import Engine
 
 from sqlagent.cache import SqlCache
-from sqlagent.config import Settings, apply_overrides, options_of, settings
+from sqlagent.config import (
+    Settings,
+    apply_overrides,
+    decompose_enabled,
+    options_of,
+    settings,
+)
 from sqlagent.conversation import (
     Turn,
     carryable_result,
@@ -318,7 +324,7 @@ class SqlAgent:
         # each part is answered through this same method, then the findings are
         # written up as one answer. Only attempted for a first question — a
         # follow-up refines something, it does not open a new investigation.
-        if config.decompose_questions and not history:
+        if decompose_enabled(config) and not history:
             # Screening runs *first*. Decomposition happens above the graph, so
             # it used to skip the ambiguity check entirely: a vague question was
             # split into vague parts, each answered badly, and the findings

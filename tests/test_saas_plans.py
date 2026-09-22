@@ -58,11 +58,11 @@ def test_the_plan_names_match_unilinks_enum():
 
 
 def test_a_tenant_under_their_limit_may_ask():
-    assert check_quota(FREE, Usage(questions=99)) is None
+    assert check_quota(FREE, Usage(questions=19)) is None
 
 
 def test_a_tenant_at_their_limit_may_not():
-    assert check_quota(FREE, Usage(questions=100)) is not None
+    assert check_quota(FREE, Usage(questions=20)) is not None
 
 
 def test_an_unlimited_plan_is_never_denied():
@@ -89,15 +89,15 @@ def test_a_zero_limit_denies_rather_than_permits():
 def test_a_denial_carries_the_numbers():
     """"Quota exceeded" with no number is a support ticket. "100 of 100, Pro
     includes 2,000" is a decision."""
-    denial = check_quota(FREE, Usage(questions=100))
+    denial = check_quota(FREE, Usage(questions=20))
 
-    assert denial.used == 100
-    assert denial.limit == 100
-    assert "100 of 100" in denial.render()
+    assert denial.used == 20
+    assert denial.limit == 20
+    assert "20 of 20" in denial.render()
 
 
 def test_a_denial_names_the_plan_that_would_lift_it():
-    assert "Pro" in check_quota(FREE, Usage(questions=100)).render()
+    assert "Pro" in check_quota(FREE, Usage(questions=20)).render()
 
 
 def test_the_top_plan_has_nothing_to_upgrade_to():
@@ -142,6 +142,10 @@ def test_free_may_not_buy_the_expensive_quality_tier():
     assert clamp_options(FREE, {"quality_tier": "thorough"})["quality_tier"] == "fast"
 
 
+def test_free_may_not_buy_the_middle_tier_either():
+    assert clamp_options(FREE, {"quality_tier": "medium"})["quality_tier"] == "fast"
+
+
 def test_pro_may():
     assert clamp_options(PRO, {"quality_tier": "thorough"})["quality_tier"] == "thorough"
 
@@ -176,6 +180,136 @@ def test_clamping_does_not_mutate_the_caller_s_options():
 
 def test_clamping_nothing_is_safe():
     assert clamp_options(FREE, {}) == {"vote_samples": 1, "use_critic": False}
+
+
+# --------------------------------------------------------------------------
+# The detailed budget
+#
+# Separate from the main allowance because a detailed question costs several
+# times a standard one. One pooled number lets a customer spend their month in
+# an afternoon and then find the product stopped working.
+# --------------------------------------------------------------------------
+
+
+def test_detailed_questions_have_their_own_budget():
+    assert check_quota(PRO, Usage(detailed=49), detailed=True) is None
+    assert check_quota(PRO, Usage(detailed=50), detailed=True) is not None
+
+
+def test_spending_the_detailed_budget_leaves_the_standard_one_alone():
+    """Counting a detailed question against both would make the headline
+    allowance untrue."""
+    assert check_quota(PRO, Usage(questions=0, detailed=50)) is None
+
+
+def test_spending_the_standard_budget_leaves_detailed_alone():
+    assert check_quota(PRO, Usage(questions=400, detailed=0), detailed=True) is None
+
+
+def test_free_has_no_detailed_budget_at_all():
+    assert FREE.detailed_per_month == 0
+    assert check_quota(FREE, Usage(detailed=0), detailed=True) is not None
+
+
+def test_running_out_of_detailed_drops_to_medium_not_to_fast():
+    """Out of budget is not the same as never having had it. A Pro customer
+    keeps the middle tier they are paying for."""
+    clamped = clamp_options(PRO, {"quality_tier": "thorough"}, Usage(detailed=50))
+
+    assert clamped["quality_tier"] == "medium"
+
+
+def test_with_budget_left_a_pro_request_is_not_clamped():
+    clamped = clamp_options(PRO, {"quality_tier": "thorough"}, Usage(detailed=10))
+
+    assert clamped["quality_tier"] == "thorough"
+
+
+def test_the_denial_names_the_right_budget():
+    assert "detailed questions" in check_quota(
+        PRO, Usage(detailed=50), detailed=True
+    ).render()
+
+
+def test_enterprise_detailed_is_unlimited():
+    assert check_quota(ENTERPRISE, Usage(detailed=1_000_000), detailed=True) is None
+
+
+# --------------------------------------------------------------------------
+# Three tiers
+# --------------------------------------------------------------------------
+
+
+def test_medium_is_voting_without_the_critic():
+    """The critic measured net zero on 150 BIRD questions for 1.9x the tokens.
+    Putting it in the middle tier would be charging for latency."""
+    clamped = clamp_options(PRO, {"quality_tier": "medium"})
+
+    assert clamped["use_critic"] is False
+    assert "vote_samples" not in clamped or clamped["vote_samples"] != 1
+
+
+def test_the_tiers_are_ordered_cheapest_first():
+    from sqlagent.saas.plans import TIER_ORDER
+
+    assert TIER_ORDER == ("fast", "medium", "thorough")
+
+
+def test_the_engine_knows_the_same_three_tiers():
+    """A tier the pricing page sells and the engine rejects is a 422 nobody can
+    act on."""
+    from sqlagent.config import Settings
+    from sqlagent.saas.plans import TIER_ORDER
+
+    for tier in TIER_ORDER:
+        Settings(_env_file=None, database_url="sqlite://", quality_tier=tier)
+
+
+def test_medium_and_thorough_both_vote():
+    from sqlagent.config import Settings, vote_samples
+
+    for tier in ("medium", "thorough"):
+        config = Settings(_env_file=None, database_url="sqlite://", quality_tier=tier)
+        assert vote_samples(config) >= 3
+
+
+def test_only_thorough_runs_the_critic_and_decomposition():
+    from sqlagent.config import Settings, critic_enabled, decompose_enabled
+
+    def config(tier):
+        return Settings(_env_file=None, database_url="sqlite://", quality_tier=tier)
+
+    assert not critic_enabled(config("medium"))
+    assert critic_enabled(config("thorough"))
+    assert not decompose_enabled(config("medium"))
+    assert decompose_enabled(config("thorough"))
+
+
+# --------------------------------------------------------------------------
+# Pricing
+# --------------------------------------------------------------------------
+
+
+def test_pro_is_priced_in_both_currencies():
+    """Stored, not converted. A rate that moves would change the advertised
+    price daily, and 1,000 is a round number in a way that 15 converted is
+    not."""
+    assert PRO.price_monthly_usd == 15
+    assert PRO.price_monthly_inr == 1_000
+
+
+def test_enterprise_is_not_free():
+    """Zero means two opposite things in this table. A pricing page that reads
+    the number without the flag renders "$0" beside "unlimited"."""
+    from sqlagent.saas.plans import CUSTOM_PRICED
+
+    assert ENTERPRISE.name in CUSTOM_PRICED
+    assert FREE.name not in CUSTOM_PRICED
+
+
+def test_free_really_is_free():
+    assert FREE.price_monthly_usd == 0
+    assert FREE.price_monthly_inr == 0
 
 
 def test_free_is_pinned_to_the_light_model():

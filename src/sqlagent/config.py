@@ -225,16 +225,32 @@ class Settings(BaseSettings):
     # The point of a toggle is that the number decides, not the design document.
     # ----------------------------------------------------------------
 
-    quality_tier: Literal["fast", "thorough"] = "fast"
+    quality_tier: Literal["fast", "medium", "thorough"] = "fast"
     """How much work to spend per question.
 
-    ``fast`` is the measured default: one generation, mechanical checks only.
-    ``thorough`` turns on both voting and the critic, for questions where being
-    wrong costs more than waiting — a board figure, a compliance answer.
+    ``fast`` — one generation, mechanical checks only. The measured default,
+    and it answers most questions correctly: 58.7% on BIRD mini-dev.
 
-    A tier rather than two separate flags because "be more careful" is the
-    decision a user actually has, and asking them to reason about
-    self-consistency sampling is asking the wrong question.
+    ``medium`` — the query is written three times and the statement that
+    recurs is kept. Self-consistency has a real mechanism behind it: where the
+    model is confident the samples agree and nothing changes, and where it is
+    guessing, the version that repeats is more often the right one. Roughly 5
+    model calls against 3.
+
+    ``thorough`` — voting, a second model reviewing the query, and splitting a
+    multi-part question into parts that are answered separately. 8-10 calls and
+    several times the latency.
+
+    A tier rather than a row of flags because "be more careful" is the decision
+    a user actually has, and asking them to reason about self-consistency
+    sampling is asking the wrong question.
+
+    **What `thorough` is honestly sold on.** The critic was measured over 150
+    BIRD questions and produced identical accuracy — 88/150 either way — for
+    1.9x the tokens, rescuing four questions and breaking four (McNemar
+    p = 1.000). So the tier is not sold on the critic raising the score. It is
+    sold on decomposition, which answers questions one query cannot, and on the
+    extra scrutiny being there for someone who has decided they want it.
     """
 
     use_critic: bool = False
@@ -627,7 +643,12 @@ def apply_overrides(config: Settings, overrides: dict | None) -> Settings:
 
 
 def critic_enabled(config: Settings) -> bool:
-    """Whether Loop C runs, resolving the quality tier."""
+    """Whether Loop C runs, resolving the quality tier.
+
+    ``medium`` deliberately does not turn it on. That tier is self-consistency
+    and nothing else: the critic measured net zero on accuracy for 1.9x the
+    tokens, so putting it in the middle tier would be charging for latency.
+    """
     return config.use_critic or config.quality_tier == "thorough"
 
 
@@ -637,10 +658,26 @@ def vote_samples(config: Settings) -> int:
     The tier is resolved here, in one place, rather than at each call site —
     "does thorough imply voting?" answered in two places is a decision that
     drifts apart.
+
+    ``medium`` and ``thorough`` both imply three samples: voting *is* the
+    middle tier, and the tier above adds the critic and decomposition on top
+    rather than more samples. Beyond three, the marginal agreement gained is
+    small and the cost is linear.
     """
-    if config.quality_tier == "thorough":
+    if config.quality_tier in ("medium", "thorough"):
         return max(3, config.vote_samples)
     return max(1, config.vote_samples)
+
+
+def decompose_enabled(config: Settings) -> bool:
+    """Whether a multi-part question is split.
+
+    Forced on by ``thorough``. This is the part of that tier with a mechanism
+    nothing else provides: a question that genuinely needs three queries cannot
+    be answered by one, however carefully the one is written, and no amount of
+    reviewing a single statement finds the two questions it never addressed.
+    """
+    return config.decompose_questions or config.quality_tier == "thorough"
 
 
 def options_of(config: Settings) -> dict:
