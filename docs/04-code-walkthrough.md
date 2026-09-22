@@ -548,6 +548,135 @@ corrupt state occasionally, which is the worst kind of bug.
 
 ---
 
+## `summarise.py` — what the turn window drops
+
+History is a sliding window of the last few turns. `evicted_turns()` returns
+the complement — everything the window no longer shows — and `summarise()`
+folds those into a standing note of what is still in force.
+
+### The split is computed in one place
+
+`evicted_turns()` and `render_conversation()` take the same `window` and must
+agree about where the boundary is. A turn in both is duplicated context; a turn
+in neither is silently forgotten, which is the bug the module exists to
+prevent. Four tests assert the two partition the history exactly.
+
+### `SummaryCache.nearest()` is what makes it incremental
+
+The agent holds no per-conversation state between requests — history is rebuilt
+from the database each time. So there is nothing to be incremental *against*
+unless the cache can find it.
+
+```python
+def nearest(self, evicted) -> tuple[str, list[Turn]]:
+    turns = list(evicted)
+    for cut in range(len(turns) - 1, 0, -1):
+        found = self._entries.get(self.key(turns[:cut]))
+        if found is not None:
+            return found, turns[cut:]
+    return "", turns
+```
+
+Longest-prefix-first, so the usual case — one more turn evicted since the last
+question — hits on the first lookup. The key is a digest of the *rendered*
+turns, not of the objects: the objects are new on every request and only their
+text is stable.
+
+### The cap is on the reply
+
+```python
+if len(text) > MAX_SUMMARY_CHARS:
+    clipped = text[:MAX_SUMMARY_CHARS]
+    stop = clipped.rfind(". ")
+    text = clipped[: stop + 1] if stop > MAX_SUMMARY_CHARS // 2 else clipped.rstrip()
+```
+
+Told-about caps are not caps. The sentence-boundary cut is not cosmetic: a note
+ending mid-clause reads as a fact that was cut short, which is a different
+claim from the one the model made.
+
+### `NONE` clears rather than fails
+
+A run of unrelated lookups carries nothing forward. The model replying `NONE`
+empties the note instead of leaving it asserting something no longer true.
+
+---
+
+## `judge.py` — grading the sentence
+
+Execution accuracy measures the SQL. The faithfulness guard checks figures
+against rows. Neither can see an answer that quotes every number correctly and
+answers a different question.
+
+### Three booleans, not a score
+
+`answers_question`, `complete`, `supported`. A 1–5 rating is uncalibrated
+between runs and unactionable within one — "3.4" does not say what to fix.
+
+### A missing field is ungraded, not passed
+
+```python
+for field in ("answers_question", "complete", "supported"):
+    if not isinstance(payload.get(field), bool):
+        return None
+```
+
+`isinstance(..., bool)` rather than truthiness, because `"yes"` is truthy and
+would have scored as a pass. A judge that reports "fine" when it could not be
+reached inflates exactly the number it exists to produce, so `JudgeReport`
+counts `ungraded` beside `quality` rather than folding it in.
+
+### `Verdict.from_defects` round-trips
+
+A run is stored as outcomes, not verdicts, so re-deriving the report from a
+results file goes back through the defect names. An unknown name raises rather
+than being ignored — ignoring it would score a graded failure as clean.
+
+---
+
+## `drift.py` — has it started behaving differently
+
+### Everything is a proportion
+
+Five signals, one test. Latency and cost are continuous, and comparing their
+means properly needs a rank test or a distributional assumption response times
+do not satisfy. Each becomes "how often is it worse than this deployment's own
+p90", which is a proportion — and the threshold comes from the data rather than
+from someone's guess.
+
+### The z-test, without a numerical stack
+
+```python
+pooled = (hits_a + hits_b) / (n_a + n_b)
+variance = pooled * (1.0 - pooled) * (1.0 / n_a + 1.0 / n_b)
+if variance <= 0.0:
+    return 1.0
+z = (p_b - p_a) / math.sqrt(variance)
+return math.erfc(abs(z) / math.sqrt(2.0))
+```
+
+`erfc` gives the normal tail exactly, so there is no table and no dependency.
+Two rates that are both 0% or both 100% make the pooled variance zero and the
+z-score undefined; returning 1.0 keeps a degenerate metric from taking the
+whole report down.
+
+### Both gates, always
+
+`p < alpha and abs(change) >= min_change`. Significance alone fires on 4.0% →
+4.4% at a few thousand questions. Effect size alone fires constantly at small
+n. α is 0.01 rather than 0.05 because five metrics are tested together.
+
+### A clarification is not a failure
+
+Found by running this against the project's own history: the failure rate
+appeared to rise from 1.6% to 35%, and 31 of those 35 were the agent asking a
+question back. `failure_rate` now excludes them and `clarify_rate` counts them
+separately. `CLARIFICATION_ERROR` lives in `clarify.py` and is imported by the
+four places that compare against it, because it used to be a bare string in
+each.
+
+---
+
 ## `benchmarks/bird.py` — measuring it
 
 ### Comparing result sets, not SQL text

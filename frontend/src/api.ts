@@ -168,6 +168,7 @@ export interface AskOptions {
   cache_sql?: boolean;
   summarise_conversation?: boolean;
   conversation_window?: number;
+  max_clarifying_questions?: number;
 }
 
 export interface ToggleInfo {
@@ -306,6 +307,53 @@ export const searchTurns = (term: string, limit = 50) =>
   );
 
 export const getStats = () => json<Stats>('/api/stats');
+
+/** One metric that moved between two periods, with the evidence for saying so.
+ *
+ *  Every metric is a rate of something undesirable, so `worse` is not simply
+ *  `change > 0` restated — a drop is still drift, still worth showing, and must
+ *  not be rendered as an alarm. */
+export interface DriftShift {
+  metric: string;
+  baseline: number;
+  recent: number;
+  change: number;
+  worse: boolean;
+  p_value: number;
+  description: string;
+}
+
+export interface DriftReport {
+  baseline_n: number;
+  recent_n: number;
+  /** False when there was not enough history to compare. Distinct from an
+   *  empty `shifts`: one means nothing moved, the other means nobody looked,
+   *  and a fresh install showing "no drift" is a claim nobody made. */
+  enough_data: boolean;
+  drifted: boolean;
+  shifts: DriftShift[];
+  /** Every metric's [baseline, recent], moved or not. A metric that held is
+   *  evidence too: "slower but no more failures" is a different situation from
+   *  "both", and only one of them is a correctness concern. */
+  rates: Record<string, [number, number]>;
+  summary: string;
+}
+
+export const getDrift = (recent = 100, baseline = 300) =>
+  json<DriftReport>(`/api/drift?recent=${recent}&baseline=${baseline}`);
+
+/** What each rate means, in the user's terms.
+ *
+ *  Kept next to the type so a metric added server-side shows up as a missing
+ *  key here rather than as a raw identifier in the interface. */
+export const DRIFT_LABELS: Record<string, string> = {
+  failure_rate: 'questions that failed',
+  clarify_rate: 'questions asked back',
+  repair_rate: 'queries needing a repair',
+  empty_rate: 'queries returning nothing',
+  slow_rate: 'slower than this system used to be',
+  costly_rate: 'costlier than this system used to be',
+};
 
 /** Opening questions proposed for this database.
  *

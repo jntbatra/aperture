@@ -450,6 +450,7 @@ class SqlAgent:
                 question=question,
                 schema_text="Tables: " + ", ".join(sorted(self.snapshot.tables)),
                 model=config.light_model,
+                max_asks=config.max_clarifying_questions,
                 trace=trace,
             )
             if clarification is not None:

@@ -58,6 +58,9 @@ exists *and* a test covers it — a ticket is not closed by a plan.
 | 41 | Client guessed which toggles were numeric | `ToggleInfo.numeric`, declared by the server |
 | 43 | Clarifications counted as failures in drift and in the sidebar | `clarify.CLARIFICATION_ERROR`, `drift.clarify_rate`, `store.stats`, tests in `test_drift.py` and `test_store.py` |
 | 44 | `"needs_clarification"` written out as a literal in four places | one constant in `clarify.py`, imported by the graph, the pipeline, the API and drift |
+| 45 | `/api/drift` had no interface — endpoint built, nothing showed it | `frontend/src/components/Drift.tsx`, verified rendering against live data with no console errors |
+| 46 | New work documented only in `07-decisions.md` | `04-code-walkthrough.md` (summarise/judge/drift), `05-frontend.md` (Toggles, Drift, sidebar counters), `06-operations.md` (judge, stability, drift, conversation settings), `README.md` |
+| 47 | Clarifier capped at 3, and the cap was hardcoded in the prompt | `max_clarifying_questions`, default 7, overridable; prompt interpolates the same number it is held to |
 
 ---
 

@@ -279,6 +279,7 @@ def make_screen(agent: SqlAgent, config: Settings, emit):
                     window=config.conversation_window,
                     summary=state.get("history_summary", ""),
                 ),
+                max_asks=config.max_clarifying_questions,
                 trace=trace,
             )
             if clarification is not None:

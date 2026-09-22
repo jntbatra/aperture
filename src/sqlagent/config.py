@@ -339,6 +339,25 @@ class Settings(BaseSettings):
     the only optional one.
     """
 
+    max_clarifying_questions: int = 7
+    """Ceiling on how many things the agent asks about at once.
+
+    A ceiling, not a target: the model decides how many ambiguities a question
+    actually has, and this only stops a runaway — "do a detailed study of the
+    business" must not come back as a questionnaire.
+
+    It was 3, and 3 was too low for the questions people ask. "Who are our best
+    customers lately and how are they doing compared to last year" has four
+    genuine ambiguities, and truncating to three left the fourth to be silently
+    invented — the exact failure the ambiguity check exists to prevent, arrived
+    at through the cap meant to make it usable.
+
+    Overridable because how much back-and-forth is tolerable depends on who is
+    asking, not on the deployment. Set it to 1 for a terse exchange; the agent
+    will ask about the single worst ambiguity and guess the rest, which is a
+    trade the person asking should get to make.
+    """
+
     conversation_window: int = 4
     """Turns of history rendered to the model in full, most recent last.
 
@@ -537,6 +556,7 @@ OVERRIDABLE = frozenset(
         "cache_sql",
         "conversation_window",
         "summarise_conversation",
+        "max_clarifying_questions",
     }
 )
 """Settings a request may override. Deliberately an allow-list, not a denylist.

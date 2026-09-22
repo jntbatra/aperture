@@ -211,6 +211,70 @@ interface feel unfinished.
 
 ---
 
+### `Toggles`
+
+The quality settings, on the page rather than in an environment variable. Every
+one trades latency and tokens for a better chance of being right, and which
+side of that trade you want depends on the *question* — "check this one
+carefully, it is going in a board pack" is a decision made while asking.
+
+**The list comes from the server.** `GET /api/options` returns each toggle's
+label, help text, cost and choices. Hardcoding it here would mean a toggle
+added server-side is invisible until someone remembers to update the client,
+with an explanation that drifts out of date and no test to catch it.
+
+**Numeric-ness comes from the server too.** The component used to decide which
+choices were numbers from a hardcoded list of names, so a new numeric toggle
+sent `"4"` where the schema wanted `4` and the user got a 422 they could not
+act on. `ToggleInfo.numeric` is now declared alongside the choices, and a test
+asserts it matches the request schema's own type.
+
+**Unset and off are different.** Clearing a toggle removes the key rather than
+sending `false`, so a user who resets goes back to following the server rather
+than being pinned to whatever the default happened to be the day they first
+opened the panel.
+
+### `Drift`
+
+Opened from the header, never shown unprompted.
+
+The wording is load-bearing. Nothing in the history says whether an answer was
+*right* — there is no label — so the panel claims only that one set of
+questions was answered measurably differently from another, with a p-value, and
+says outright that a shift is a prompt to go and look rather than a verdict.
+
+Three states that a simpler panel would collapse into one:
+
+- **Not enough history.** Distinct from "nothing moved". A fresh install
+  rendering a calm panel is a claim nobody made.
+- **Nothing moved by enough to report.**
+- **Shifts**, each with its p-value on screen. Without it the panel is a row of
+  percentages that move between any two samples, which produces a false alarm
+  on a slow Tuesday and trains everyone to ignore it.
+
+Every metric is a rate of something undesirable, so a *fall* is good news and
+still drift. `drift__shift--better` is green; colouring by movement rather than
+by direction would make the panel unreadable at a glance.
+
+Underneath the shifts, every metric that *held* is listed too. "Slower but no
+more failures" is a different situation from "both moved", and only one of them
+is a correctness concern.
+
+The panel reuses the toggles' overlay and scrim. Same kind of thing — a
+deliberately opened layer over the conversation — and a second visual language
+would be two things to maintain and one more layout to get wrong on a narrow
+screen.
+
+### The sidebar's counters
+
+`X% answered` is over the turns where an answer was *attempted*. A clarifying
+question is stored with `ok = 0` because no answer was produced, and counting
+it as a failure had the sidebar reporting **78% answered** on a system where
+almost nothing had failed and a third of turns were the agent declining to
+guess. Clarifications now appear as their own `asked back` counter.
+
+---
+
 ## Accessibility
 
 Not an afterthought, and cheap when done as you go:

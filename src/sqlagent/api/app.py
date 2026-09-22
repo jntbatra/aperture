@@ -110,6 +110,9 @@ class AskOptions(BaseModel):
 
     summarise_conversation: bool | None = None
     conversation_window: int | None = Field(default=None, ge=0, le=20)
+    max_clarifying_questions: int | None = Field(default=None, ge=1, le=10)
+    """Ceiling on how many things the agent asks at once. At least 1: a
+    clarification with nothing in it stops the user and tells them nothing."""
     """How many turns the model sees in full. Capped at 20 here as well as in
     the settings: an unbounded window is a prompt that grows until the schema is
     squeezed out, and that is not something a client should be able to do."""
@@ -425,6 +428,22 @@ TOGGLE_DESCRIPTIONS: list[ToggleInfo] = [
         ),
         cost="+1 model call, only once a chat outgrows the window",
         kind="switch",
+    ),
+    ToggleInfo(
+        name="max_clarifying_questions",
+        label="Questions asked back",
+        help=(
+            "When a question has more than one defensible answer, the agent "
+            "asks rather than guessing. This caps how many things it asks "
+            "about at once — it asks about as many ambiguities as the question "
+            "actually has, up to this. Lower it for a terse exchange; the "
+            "agent will ask about the worst one and take its best guess at the "
+            "rest."
+        ),
+        cost="a longer exchange before any answer",
+        kind="choice",
+        choices=["1", "3", "5", "7"],
+        numeric=True,
     ),
     ToggleInfo(
         name="conversation_window",

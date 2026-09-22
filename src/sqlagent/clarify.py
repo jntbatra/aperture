@@ -60,7 +60,7 @@ from sqlagent.llm.mantle import json_from_reply
 
 logger = logging.getLogger(__name__)
 
-CLARIFY_SYSTEM_PROMPT = """\
+CLARIFY_SYSTEM_PROMPT_TEMPLATE = """\
 You decide whether a question about a database has more than one defensible
 answer. You do not answer it.
 
@@ -92,13 +92,20 @@ Say ambiguous: false for everything else, including:
 Uncertainty is not ambiguity. If one reading is clearly the common one, take it.
 
 "Who are our best customers lately?" is ambiguous twice - what "best" measures,
-and what period "lately" covers - so it produces TWO entries. Asking about only
+and what period "lately" covers - so it produces two entries. Asking about only
 one leaves the agent to silently invent the other, which is the failure this
-check exists to prevent.
+check exists to prevent. A question with four genuine ambiguities gets four
+entries; do not stop at two because two feels like enough.
 
 Each "question" must be answerable in a few words, and each "options" list must
-hold real alternatives, not "please clarify". At most 3 entries.
+hold real alternatives, not "please clarify".
+
+Produce as many entries as the question genuinely has ambiguities, up to
+{max_asks}. Do not pad: a question with one unclear word gets one entry. Do not
+merge to stay under the limit either — if there are three genuine ambiguities,
+ask three.
 """
+
 
 
 CLARIFICATION_ERROR = "needs_clarification"
@@ -111,11 +118,39 @@ count it as one. It was a literal string in each, and the fourth got it right
 only by luck.
 """
 
-MAX_ASKS = 3
-"""Bound on how many things to ask at once.
+MAX_ASKS = 7
+"""Default ceiling on how many things to ask at once.
 
-Past three the exchange stops being a clarification and becomes a form.
+A ceiling, not a target. The model decides how many ambiguities a question
+actually has and the cap only stops a runaway — "do a detailed study of the
+business" should not come back as a questionnaire.
+
+It was 3, which was too low for the questions people actually ask. "Who are
+our best customers lately and how are they doing compared to last year" has
+four genuine ambiguities — what "best" measures, what "lately" covers, what
+"doing" means, and which comparison period — and truncating to three left the
+fourth to be silently invented, which is the exact failure this check exists to
+prevent. A question that needs four answers and gets three asked is worse than
+one that gets all four asked, because the user believes they have pinned it
+down.
+
+Overridable per request as ``max_clarifying_questions``: how much
+back-and-forth is tolerable is a property of who is asking, not of the code.
 """
+
+def clarify_system_prompt(max_asks: int = MAX_ASKS) -> str:
+    """The system prompt with the cap filled in.
+
+    The number is substituted rather than hardcoded so the prompt and the
+    enforcement below cannot disagree. They did: the prompt said "at most 3
+    entries" while the cap was a separate constant, and raising one without the
+    other would silently truncate a model that was doing as it was told.
+
+    A plain replace, not ``str.format``: the prompt shows the model a JSON
+    example, and every brace in it would have to be doubled to survive
+    formatting — an escaping rule nobody editing a prompt should have to know.
+    """
+    return CLARIFY_SYSTEM_PROMPT_TEMPLATE.replace("{max_asks}", str(max_asks))
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +200,7 @@ def needs_clarification(
     schema_text: str,
     model: str,
     conversation: str = "",
+    max_asks: int = MAX_ASKS,
     trace=None,
 ) -> Clarification | None:
     """Decide whether to ask before answering. Never raises.
@@ -187,7 +223,7 @@ def needs_clarification(
             + f"Question: {question}\n\n"
             "Does this question have more than one defensible answer? JSON only.",
             model=model,
-            system=CLARIFY_SYSTEM_PROMPT,
+            system=clarify_system_prompt(max_asks),
         )
         if trace is not None:
             trace.record(completion)
@@ -232,4 +268,6 @@ def needs_clarification(
         logger.info("ambiguity reported with no question attached; ignoring")
         return None
 
-    return Clarification(asks=tuple(asks[:MAX_ASKS]))
+    # Enforced after the reply as well as asked for in the prompt. A cap the
+    # model is merely told about is not a cap.
+    return Clarification(asks=tuple(asks[: max(1, max_asks)]))

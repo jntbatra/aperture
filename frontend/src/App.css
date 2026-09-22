@@ -1418,3 +1418,97 @@ td.is-null {
   font-size: 11.5px;
   color: var(--ink-faint);
 }
+
+/* --------------------------------------------------------------------------
+   Drift
+   --------------------------------------------------------------------------
+   Reuses the toggles panel's shell and scrim: it is the same kind of thing —
+   a deliberately opened overlay over the conversation — and a second visual
+   language for it would be two things to maintain and one more layout to get
+   wrong on a narrow screen.
+   -------------------------------------------------------------------------- */
+
+.drift {
+  max-width: 480px;
+}
+
+.drift__note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted, #6b7280);
+}
+
+.drift__shifts {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drift__shift {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  /* Coloured by direction, not by movement. Every metric here is a rate of
+     something undesirable, so a fall is good news and still drift — rendering
+     it in the same red as a rise would make the panel unreadable at a glance. */
+  border-left: 3px solid transparent;
+}
+
+.drift__shift--worse {
+  background: rgba(220, 38, 38, 0.06);
+  border-left-color: #dc2626;
+}
+
+.drift__shift--better {
+  background: rgba(22, 163, 74, 0.06);
+  border-left-color: #16a34a;
+}
+
+.drift__metric {
+  font-size: 13px;
+}
+
+.drift__numbers {
+  font-size: 13px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* The p-value is smaller than the figures but never hidden. Without it the
+   panel is a row of percentages that move between any two samples. */
+.drift__p {
+  display: block;
+  font-size: 11px;
+  color: var(--muted, #6b7280);
+}
+
+.drift__rates {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+}
+
+.drift__rates td {
+  padding: 3px 0;
+}
+
+.drift__rates td:not(:first-child) {
+  text-align: right;
+  width: 64px;
+  font-variant-numeric: tabular-nums;
+}
+
+.drift__caveat {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #6b7280);
+}

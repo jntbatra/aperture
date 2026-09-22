@@ -46,13 +46,33 @@ conditional edges in the LangGraph state graph that orchestrates a request.
 
 **It is measured, not assumed.** A benchmark harness runs the agent against
 BIRD mini-dev — 500 human-written questions over 11 real databases — and scores
-it by comparing result sets against gold queries.
+it by comparing result sets against gold queries. Three more instruments sit
+beside it: an **answer judge** that grades the prose execution accuracy cannot
+see (right rows, wrong write-up), a **stability harness** that asks the same
+question five times to find out how often the ambiguity check agrees with
+itself, and **drift detection** comparing recent questions against earlier ones
+with a p-value attached.
 
-**It holds a conversation.** Ask "How many orders were delivered?", then "break
-that down by month" — the second is not a question about a database on its own,
-and it is answered anyway. Recent turns are carried into the prompt as their
-question plus the SQL they produced, which is the compact, precise record of
-what was measured. Threads live server-side, so a reload does not lose one.
+**It says when something changed, and what it cannot know.** The Drift panel
+compares the last hundred questions against the ones before them across six
+rates, reporting a shift only when it is both significant and large enough to
+act on. It is careful about the claim: nothing in the history says whether an
+answer was *right*, so a shift is a prompt to go and look, never a verdict.
+Pointed at this project's own history it found a real bug in its first run — a
+clarifying question was being counted as a failure, which had the interface
+reporting 78% answered on a system where almost nothing had failed.
+
+**It holds a conversation, and remembers past the window.** Ask "How many
+orders were delivered?", then "break that down by month" — the second is not a
+question about a database on its own, and it is answered anyway. Recent turns
+are carried as their question plus the SQL they produced; older ones are folded
+into a standing note of what still applies. Measured on the live database:
+across five turns with a two-turn window, "only DELIVERED orders, exclude test
+accounts" set in turn 1 still constrains turn 5. With the note switched off,
+both filters are gone and the figure is **37% higher** — an
+overstatement, compared against the earlier constrained number as though the
+two were the same measurement. Threads live server-side, so a reload does not
+lose one.
 
 **It checks its own answer.** The query running is not the same as the answer
 being true. A separate guard compares the sentence against the rows it claims to
@@ -72,10 +92,12 @@ the SQL it produced and the conversation it came from.
 
 **You choose how hard it tries, per question.** A tuning panel on the homepage
 exposes the quality toggles — review the query with a second model, write it
-three times and keep what recurs, ask when a question is ambiguous, split a
-multi-part question. Each states what it costs, because a toggle offered without
-a price gets switched on by everyone. Measured on a real database: 3 model calls
-by default, 6 on `thorough`.
+three times and keep what recurs, ask when a question is ambiguous, how many
+things it may ask about at once, how many turns it remembers in full. Each
+states what it costs, because a toggle offered without a price gets switched on
+by everyone. The list, the help text and even which choices are numbers come
+from the server, so a toggle added there appears here without a client change.
+Measured on a real database: 3 model calls by default, 6 on `thorough`.
 
 **Other assistants can use it.** An MCP server offers three tools —
 `ask_database`, `list_tables`, `describe_table` — so another agent can ask this
@@ -131,6 +153,7 @@ top and work down.
 | 5 | [The web interface](docs/05-frontend.md) | React app, streaming, the design system |
 | 6 | [Running it](docs/06-operations.md) | Configuration, deployment, benchmarking, troubleshooting |
 | 7 | [Decisions and measurements](docs/07-decisions.md) | Every significant choice, what it cost, what it bought |
+| — | [Tickets](TICKETS.md) | Every decision as a ticket with its real status: done, open, or won't-build with the reason |
 
 ---
 
@@ -162,6 +185,9 @@ sql-agent/
 │   ├── ingest.py            CSV / Excel / pg-dump upload → queryable database
 │   ├── store.py             History, conversations and dataset registry (SQLite)
 │   ├── conversation.py      Turns carried into the prompt so follow-ups resolve
+│   ├── summarise.py         Fold turns past the window into a standing note
+│   ├── judge.py             Grade a finished answer, offline — is it the answer asked for
+│   ├── drift.py             Did recent questions go differently from earlier ones
 │   ├── glossary.py          Units, terms and metrics the schema cannot express
 │   ├── cache.py             Question → SQL. The statement, never the rows
 │   ├── voting.py            Sample N times, keep the query that recurs (opt-in)
@@ -176,7 +202,9 @@ sql-agent/
 ├── frontend/            React + TypeScript web interface
 │                        (schema graph drawn with React Flow)
 ├── benchmarks/
-│   └── bird.py              BIRD mini-dev harness
+│   ├── bird.py              BIRD mini-dev harness (--judge grades the prose too)
+│   ├── ambiguity.py         How often does the ambiguity check agree with itself
+│   └── ambiguity_questions.json  30 labelled questions, 15 vague / 15 clear
 ├── glossaries/
 │   └── example.jsonDeclared units and terms for one real database
 ├── tests/               487 tests

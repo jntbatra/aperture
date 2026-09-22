@@ -7,7 +7,13 @@ An error inside either resolves to "carry on".
 
 from __future__ import annotations
 
-from sqlagent.clarify import MAX_ASKS, Ask, Clarification, needs_clarification
+from sqlagent.clarify import (
+    MAX_ASKS,
+    Ask,
+    Clarification,
+    clarify_system_prompt,
+    needs_clarification,
+)
 from sqlagent.guards.prescreen import screen
 from sqlagent.llm.mantle import Completion
 
@@ -16,8 +22,10 @@ class StubClient:
     def __init__(self, reply: str = "", *, fail: bool = False):
         self._reply = reply
         self._fail = fail
+        self.systems: list[str | None] = []
 
     def complete(self, prompt, *, model=None, system=None, temperature=None):
+        self.systems.append(system)
         if self._fail:
             raise RuntimeError("model unavailable")
         return Completion(
@@ -25,12 +33,13 @@ class StubClient:
         )
 
 
-def clarify(reply: str = "", **kwargs):
+def clarify(reply: str = "", *, fail: bool = False, client=None, **kwargs):
     return needs_clarification(
-        StubClient(reply, **kwargs),
+        client or StubClient(reply, fail=fail),
         question="show me our top customers",
         schema_text="Tables: customers, orders",
         model="m",
+        **kwargs,
     )
 
 
@@ -65,14 +74,69 @@ def test_two_ambiguities_produce_two_separate_asks():
     assert result.asks[1].options == ("last 30 days", "last quarter")
 
 
-def test_asks_are_bounded():
-    """Past three it stops being a clarification and becomes a form."""
-    many = ",".join(
-        f'{{"question": "q{i}", "options": ["a", "b"]}}' for i in range(8)
+def many_asks(count: int) -> str:
+    entries = ",".join(
+        f'{{"question": "q{i}", "options": ["a", "b"]}}' for i in range(count)
     )
-    result = clarify(f'{{"ambiguous": true, "asks": [{many}]}}')
+    return f'{{"ambiguous": true, "asks": [{entries}]}}'
+
+
+def test_asks_are_bounded():
+    """A ceiling, not a target. Without it, "do a detailed study of the
+    business" comes back as a questionnaire."""
+    result = clarify(many_asks(20))
 
     assert len(result.asks) == MAX_ASKS
+
+
+def test_the_bound_is_seven_not_three():
+    """Three was too low for the questions people ask. "Who are our best
+    customers lately and how are they doing compared to last year" has four
+    genuine ambiguities; truncating to three left the fourth to be silently
+    invented — the exact failure this check exists to prevent."""
+    assert MAX_ASKS == 7
+
+
+def test_the_bound_can_be_lowered_per_request():
+    """How much back-and-forth is tolerable depends on who is asking."""
+    result = clarify(many_asks(20), max_asks=2)
+
+    assert len(result.asks) == 2
+
+
+def test_a_question_with_fewer_ambiguities_is_not_padded_to_the_cap():
+    """The model decides how many; the cap only stops a runaway."""
+    result = clarify(many_asks(2))
+
+    assert len(result.asks) == 2
+
+
+def test_a_cap_of_zero_still_asks_about_one_thing():
+    """A clarification with nothing in it stops the user and tells them
+    nothing — strictly worse than not asking at all."""
+    result = clarify(many_asks(5), max_asks=0)
+
+    assert len(result.asks) == 1
+
+
+def test_the_prompt_states_the_cap_it_will_be_held_to():
+    """The prompt said "at most 3 entries" while the cap was a separate
+    constant. Raising one without the other silently truncates a model that was
+    doing as it was told."""
+    client = StubClient(many_asks(1))
+    clarify(client=client, max_asks=5)
+
+    assert "up to\n5." in client.systems[0] or "up to 5" in client.systems[0]
+
+
+def test_the_prompt_survives_its_own_json_example():
+    """It shows the model a JSON object. Substituting with str.format would
+    need every brace doubled — an escaping rule nobody editing a prompt should
+    have to know."""
+    text = clarify_system_prompt(7)
+
+    assert '{"ambiguous": false}' in text
+    assert "{max_asks}" not in text
 
 
 def test_the_older_single_question_shape_is_still_accepted():

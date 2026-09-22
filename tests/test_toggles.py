@@ -831,3 +831,53 @@ def test_a_summarisation_failure_still_answers(database):
     result = agent.ask("how many orders?", history=long_history(7))
 
     assert result.ok
+
+
+# --------------------------------------------------------------------------
+# How many things to ask about at once
+# --------------------------------------------------------------------------
+
+
+FOUR_ASKS = (
+    '{"ambiguous": true, "asks": ['
+    '{"question": "Best by what?", "options": ["revenue", "orders"]},'
+    '{"question": "Lately means?", "options": ["30 days", "quarter"]},'
+    '{"question": "Doing how?", "options": ["spend", "frequency"]},'
+    '{"question": "Compared to when?", "options": ["last year", "last quarter"]}]}'
+)
+
+
+def test_all_four_ambiguities_reach_the_user(database):
+    """The cap was 3, and this question has four. The fourth was silently
+    invented — the exact failure the check exists to prevent."""
+    agent = build(database, ScriptedClient(FOUR_ASKS), ambiguity_handling="ask_human")
+
+    result = agent.ask("who are our best customers lately and how are they doing "
+                       "compared to last year?")
+
+    assert len(result.clarification_asks) == 4
+
+
+def test_lowering_the_cap_shortens_the_exchange(database):
+    agent = build(
+        database,
+        ScriptedClient(FOUR_ASKS),
+        ambiguity_handling="ask_human",
+        max_clarifying_questions=2,
+    )
+
+    result = agent.ask("who are our best customers lately?")
+
+    assert len(result.clarification_asks) == 2
+
+
+def test_the_cap_reaches_the_prompt_not_just_the_truncation(database):
+    """Otherwise the model is told one number and held to another."""
+    client = ScriptedClient(FOUR_ASKS)
+    agent = build(
+        database, client, ambiguity_handling="ask_human", max_clarifying_questions=5
+    )
+
+    agent.ask("who are our best customers?")
+
+    assert any(system and "5." in system for system in client.systems)

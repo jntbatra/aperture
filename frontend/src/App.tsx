@@ -33,6 +33,7 @@ import {
   type ProgressEvent,
   type SchemaResponse,
 } from './api';
+import { Drift } from './components/Drift';
 import { Sidebar } from './components/Sidebar';
 import { Toggles, loadOptions } from './components/Toggles';
 import { Transcript, type Exchange } from './components/Transcript';
@@ -176,6 +177,10 @@ export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Opened deliberately, never shown unprompted. A panel that pops up saying
+  // something changed, on evidence that cannot distinguish a regression from a
+  // settings change, is an alarm nobody would keep.
+  const [driftOpen, setDriftOpen] = useState(false);
 
   // null means the database this server was started with; a string selects an
   // uploaded dataset.
@@ -305,6 +310,7 @@ export default function App() {
 
   return (
     <div className="shell">
+      {driftOpen && <Drift onClose={() => setDriftOpen(false)} />}
       <header className="header">
         <div className="header__brand">
           <span className="header__mark" />
@@ -343,6 +349,13 @@ export default function App() {
             </button>
           )}
           <Toggles options={options} onChange={setOptions} disabled={busy} />
+          <button
+            className="ghost-button"
+            onClick={() => setDriftOpen(true)}
+            title="Compare recent questions against earlier ones"
+          >
+            Drift
+          </button>
           <button className="ghost-button" onClick={startNewThread} disabled={empty && !threadId}>
             New chat
           </button>
