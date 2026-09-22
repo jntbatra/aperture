@@ -8,6 +8,7 @@ partly to keep it from drifting into pretending otherwise.
 
 from __future__ import annotations
 
+from sqlagent.clarify import CLARIFICATION_ERROR
 from sqlagent.drift import (
     ALPHA,
     MIN_CHANGE,
@@ -22,7 +23,14 @@ from sqlagent.drift import (
 
 
 def samples(count: int, **kwargs) -> list[Sample]:
-    base = {"ok": True, "repaired": False, "empty": False, "seconds": 1.0, "tokens": 1000}
+    base = {
+        "ok": True,
+        "clarified": False,
+        "repaired": False,
+        "empty": False,
+        "seconds": 1.0,
+        "tokens": 1000,
+    }
     return [Sample(**{**base, **kwargs}) for _ in range(count)]
 
 
@@ -231,6 +239,7 @@ def test_metrics_that_held_are_still_reported():
     assert report.rates["failure_rate"] == (0.0, 0.0)
     assert set(report.rates) == {
         "failure_rate",
+        "clarify_rate",
         "repair_rate",
         "empty_rate",
         "slow_rate",
@@ -245,7 +254,14 @@ def test_metrics_that_held_are_still_reported():
 
 class Row:
     def __init__(self, **kwargs):
-        defaults = {"ok": 1, "repairs": 0, "row_count": 3, "seconds": 1.0, "tokens": 500}
+        defaults = {
+            "ok": 1,
+            "error": None,
+            "repairs": 0,
+            "row_count": 3,
+            "seconds": 1.0,
+            "tokens": 500,
+        }
         for key, value in {**defaults, **kwargs}.items():
             setattr(self, key, value)
 
@@ -253,7 +269,9 @@ class Row:
 def test_a_stored_row_becomes_a_sample():
     sample = sample_from_entry(Row(ok=1, repairs=2, row_count=0, seconds=4.0, tokens=900))
 
-    assert sample == Sample(ok=True, repaired=True, empty=True, seconds=4.0, tokens=900)
+    assert sample == Sample(
+        ok=True, clarified=False, repaired=True, empty=True, seconds=4.0, tokens=900
+    )
 
 
 def test_a_failed_question_is_not_also_counted_as_empty():
@@ -294,3 +312,59 @@ def test_a_shift_renders_its_evidence():
 
     for fragment in ("failure_rate", "up", "5.0%", "40.0%", "n=100", "p="):
         assert fragment in text
+
+
+# --------------------------------------------------------------------------
+# Clarifications are not failures
+#
+# Found by running this module against real history for the first time: the
+# failure rate was reported as rising from 1.6% to 35%, and 31 of those 35
+# "failures" were the agent asking a question back — doing exactly what
+# switching `ambiguity_handling` to `ask_human` configured it to do. The metric
+# was measuring a settings change and calling it a regression.
+# --------------------------------------------------------------------------
+
+
+def test_a_clarification_is_read_off_the_stored_error():
+    sample = sample_from_entry(Row(ok=0, error=CLARIFICATION_ERROR))
+
+    assert sample.clarified
+    assert not sample.ok
+
+
+def test_an_ordinary_failure_is_not_a_clarification():
+    assert not sample_from_entry(Row(ok=0, error="syntax error")).clarified
+
+
+def test_clarifications_do_not_count_as_failures():
+    baseline = samples(100)
+    recent = samples(50) + samples(50, ok=False, clarified=True)
+
+    report = detect_drift(baseline, recent)
+
+    assert report.rates["failure_rate"] == (0.0, 0.0)
+
+
+def test_a_surge_of_clarifications_is_still_reported_on_its_own():
+    """An agent that suddenly asks about everything has changed, even though
+    nothing failed."""
+    report = detect_drift(samples(100), samples(50) + samples(50, ok=False, clarified=True))
+
+    assert [s.metric for s in report.shifts] == ["clarify_rate"]
+
+
+def test_a_real_failure_alongside_clarifications_is_still_caught():
+    """Excluding clarifications must not mask the thing the metric is for."""
+    recent = samples(20) + samples(40, ok=False, clarified=True) + samples(40, ok=False)
+
+    report = detect_drift(samples(100), recent)
+
+    assert "failure_rate" in [s.metric for s in report.shifts]
+
+
+def test_the_marker_is_the_one_the_agent_actually_writes():
+    """Compared as a string against what the history table holds. Two copies of
+    that string is how this went wrong in the first place."""
+    from sqlagent.clarify import CLARIFICATION_ERROR as canonical
+
+    assert CLARIFICATION_ERROR is canonical

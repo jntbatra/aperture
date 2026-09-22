@@ -743,10 +743,127 @@ Being explicit about absences is more useful than implying completeness.
 | Charts | The API returns typed rows, so a client can. The agent does not choose visualisations |
 | Automatic PII detection | See above — a wrong heuristic is worse than an explicit list |
 | CSV / spreadsheet upload | Files carry no foreign keys, so the graph has nothing to walk. Would need inferred or declared relationships |
-| A judge for answer quality | Execution accuracy measures the SQL. The faithfulness guard checks the sentence against the rows, but whether it is *good* is unmeasured |
 | Multi-agent orchestration | A manager delegating to analyst/research/compute sub-agents. The pipeline is engineer-planned and does not need a planner; a sandboxed code interpreter is a separate security project |
-| Drift detection | Needs a baseline over time, which needs the thing to have been running over time |
+| Web search / research agent | Every answer here is traceable to a row in a named table. A retrieved web page is not, and mixing the two makes the whole answer as checkable as its weakest part |
 | Automatic glossary inference | A wrong declaration is visible in a file; a wrong inference is a silent multiplication buried in generated SQL |
+
+---
+
+## Measuring the sentence, not just the query
+
+Execution accuracy compares result rows against a gold query. It measures the
+**SQL**. The faithfulness guard checks that every figure in the answer appears
+in the rows — real, and narrow: an answer can quote every number correctly and
+still answer a different question.
+
+Observed:
+
+    Q: which kitchens cancel the most orders?
+    A: <a correct, faithful, well-written list of the kitchens with the most
+       orders>
+
+Every figure traced to a row. The query ran. Nothing noticed.
+
+`sqlagent/judge.py` grades a finished answer on three named criteria rather
+than a score: does it answer the question asked, is every part addressed, does
+it claim only what the rows show. A 1–5 rating is uncalibrated between runs and
+unactionable within one; three named defects are a bug report.
+
+Three properties that were deliberate:
+
+- **It runs offline, over a finished run.** A judge that grades an answer after
+  it has been written can only delay it. The useful version of that idea is the
+  critic, which reviews the SQL *before* it runs.
+- **A failed judgement is not a pass.** An unreachable judge that reports
+  "fine" inflates exactly the number it exists to produce. Failure returns
+  nothing, and the harness reports how many answers went ungraded beside the
+  score.
+- **A different model from the one that wrote the answer.** A reviewer and an
+  author failing the same way is the failure mode of any self-review scheme,
+  and here that failure yields a good score for a bad answer rather than a bad
+  answer.
+
+`--judge` on the BIRD harness turns it on. The answer text is stored with each
+outcome so a run can be re-judged without being re-run — judging is cheap,
+answering is not.
+
+**Not yet run.** The instrument exists; the number does not.
+
+---
+
+## Drift, and the narrow claim it is allowed to make
+
+Nothing in the history table says whether an answer was right. There is no
+label. What there is, for every question ever asked, is how it went: succeeded
+or not, needed a repair or not, how long, how many tokens, and whether the
+query came back empty.
+
+Those are proxies, and `sqlagent/drift.py` is careful about what it concludes
+from them. The claim is: *this set of questions was answered measurably
+differently from that set*, with a p-value. A human decides what it means. A
+rise in the failure rate is not proof the agent got worse — the questions may
+have got harder.
+
+Five signals, all expressed as rates so one test covers them all:
+`failure_rate`, `repair_rate`, `empty_rate`, `slow_rate`, `costly_rate`.
+Latency and cost are continuous, and comparing their means properly needs a
+rank test or an assumption about their distribution that response times do not
+satisfy. Each becomes "how often is it worse than this deployment's own 90th
+percentile", which is a proportion, and the threshold comes from the data
+rather than from someone's guess.
+
+Two gates, both required: significance at α = 0.01 **and** an absolute change
+of at least five percentage points. Significance alone fires on 4.0% → 4.4% at
+a few thousand questions — real, and not worth anyone's attention. Effect size
+alone fires constantly at small n. Five metrics are tested together, which is
+why α is 0.01 rather than the usual 0.05: at 0.05 roughly one report in four
+would contain a spurious shift, and an alert that is wrong a quarter of the
+time gets switched off.
+
+Below thirty questions on either side the report says *not enough data* rather
+than returning an empty list of shifts. Those two states look identical to a
+caller and mean opposite things — and a fresh install reporting "no drift" is a
+claim nobody made.
+
+`GET /api/drift?recent=100&baseline=300`. The windows are counts of questions,
+not spans of time: one week may hold four hundred questions and the next
+eleven, and a rate over eleven questions is not a rate.
+
+---
+
+## Conversation summarisation
+
+The turn window is bounded for good reasons (the transcript competes with the
+schema for room in the prompt), and the bound has a cost:
+
+    turn 1:  only delivered orders, ignore the test accounts
+    ...
+    turn 9:  and what about September?
+
+By turn 9 the constraint from turn 1 has fallen out of the window. Nothing says
+"delivered only" any more, the query silently widens, and the September figure
+is computed over a different population than the March figure it is being
+compared against. Same failure mode as an inflated aggregate, different route.
+
+`sqlagent/summarise.py` folds evicted turns into a standing note of what is
+**still in force** — filters the user set and has not withdrawn, what they are
+investigating, specific ids under discussion. Explicitly not a précis of every
+turn: a summary that preserves the whole conversation grows without bound,
+which is the problem the window exists to solve.
+
+Three things that make it cheap enough to be on by default:
+
+- **Nothing happens until a conversation outgrows the window.** A first
+  question, a benchmark question and a CLI invocation all pass no history, so
+  their behaviour and their measured numbers are unchanged.
+- **It is incremental.** The previous note is passed back in with only the
+  newly-evicted turns, so each eviction folds in one turn rather than replaying
+  the conversation.
+- **It is computed once per question, not once per node.** Three nodes render
+  the conversation; each summarising again would triple the cost.
+
+The cap is enforced on the reply, not requested in the prompt. A cap the model
+is merely told about is not a cap.
 
 ---
 

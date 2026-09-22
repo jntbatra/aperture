@@ -194,6 +194,7 @@ export interface OptionsResponse {
 export interface Stats {
   total: number;
   successful: number;
+  clarified: number;
   success_rate: number;
   mean_seconds: number;
   total_tokens: number;

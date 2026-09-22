@@ -254,9 +254,17 @@ function ChatList({
           <span className="metric">
             <strong>{stats.total}</strong> asked
           </span>
+          {/* Over the turns where an answer was attempted. A clarification is
+              not a failed answer — it is the agent declining to guess — and
+              counting it as one read as a collapse. */}
           <span className="metric">
             <strong>{Math.round(stats.success_rate * 100)}%</strong> answered
           </span>
+          {stats.clarified > 0 && (
+            <span className="metric">
+              <strong>{stats.clarified}</strong> asked back
+            </span>
+          )}
           <span className="metric">
             <strong>{stats.mean_seconds}s</strong> average
           </span>

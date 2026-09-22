@@ -51,7 +51,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from sqlagent.clarify import needs_clarification
+from sqlagent.clarify import CLARIFICATION_ERROR, needs_clarification
 from sqlagent.config import Settings, critic_enabled, vote_samples
 from sqlagent.conversation import Turn, render_conversation
 from sqlagent.db.execute import ExecutionError, QueryResult, execute
@@ -704,7 +704,7 @@ def make_give_up(agent: SqlAgent, config: Settings, emit):
             return {"answer": state["refused"], "error": "refused"}
 
         if state.get("clarification"):
-            return {"answer": state["clarification"], "error": "needs_clarification"}
+            return {"answer": state["clarification"], "error": CLARIFICATION_ERROR}
 
         if state.get("error") == "no_seed_tables":
             return {

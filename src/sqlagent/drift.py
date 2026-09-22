@@ -23,11 +23,24 @@ Five signals, all expressed as rates, all tested the same way with a
 two-proportion z-test:
 
 * **failure_rate** — the question was not answered at all
+* **clarify_rate** — the agent asked back instead of answering
 * **repair_rate** — the first query was wrong and the loop rescued it
 * **empty_rate** — the query ran and returned nothing, which is usually a
   question that was misunderstood rather than data that does not exist
 * **slow_rate** — slower than the baseline's own 90th percentile
 * **costly_rate** — more tokens than the baseline's own 90th percentile
+
+A clarification is stored with ``ok = 0``, because from the HTTP layer's point
+of view no answer was produced. It is not a failure, and counting it as one was
+not a hypothetical: the first run of this module against real history reported
+the failure rate rising from 1.6% to 35%, and 31 of those 35 "failures" were
+the agent asking a question back — doing exactly what it was configured to do
+after ``ambiguity_handling`` was switched to ``ask_human``. The metric was
+measuring a settings change and calling it a regression.
+
+So clarifications are excluded from ``failure_rate`` and counted on their own.
+Their rate is worth watching in its own right: an agent that suddenly starts
+asking about everything has changed, even though nothing failed.
 
 Latency and cost are continuous, and comparing their means properly needs a
 rank test or an assumption about their distribution that response times do not
@@ -53,6 +66,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+
+from sqlagent.clarify import CLARIFICATION_ERROR
 
 MIN_SAMPLES = 30
 """Questions needed on each side before anything is tested.
@@ -89,6 +104,14 @@ class Sample:
     """
 
     ok: bool
+    clarified: bool
+    """The agent asked a question back rather than answering.
+
+    Stored as a failure (``ok = 0``) because no answer was produced, and it is
+    not one. Kept separate so a change in how often the agent asks does not
+    read as a change in how often it breaks.
+    """
+
     repaired: bool
     empty: bool
     seconds: float
@@ -241,7 +264,10 @@ def detect_drift(
     costly_threshold = percentile([float(s.tokens) for s in baseline], 0.9)
 
     predicates = {
-        "failure_rate": lambda s: not s.ok,
+        # A clarification is not a failure. See the module docstring: counting
+        # it as one turned a settings change into a reported regression.
+        "failure_rate": lambda s: not s.ok and not s.clarified,
+        "clarify_rate": lambda s: s.clarified,
         "repair_rate": lambda s: s.repaired,
         "empty_rate": lambda s: s.empty,
         "slow_rate": lambda s: s.seconds > slow_threshold,
@@ -295,6 +321,7 @@ def sample_from_entry(entry) -> Sample:
     """
     return Sample(
         ok=bool(entry.ok),
+        clarified=(entry.error or "") == CLARIFICATION_ERROR,
         repaired=bool(entry.repairs or 0),
         # Only counted for questions that actually ran. A failed question has no
         # rows for a reason already captured by failure_rate, and counting it

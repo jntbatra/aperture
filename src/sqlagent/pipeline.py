@@ -427,7 +427,7 @@ class SqlAgent:
         every other question is screened inside the graph exactly once, so this
         cannot double the model calls on the ordinary path.
         """
-        from sqlagent.clarify import needs_clarification
+        from sqlagent.clarify import CLARIFICATION_ERROR, needs_clarification
         from sqlagent.guards.prescreen import screen as prescreen_question
 
         def stop(answer: str, error: str, asks: list[dict] | None = None) -> AgentResult:
@@ -455,7 +455,7 @@ class SqlAgent:
             if clarification is not None:
                 return stop(
                     clarification.render(),
-                    "needs_clarification",
+                    CLARIFICATION_ERROR,
                     [
                         {"question": ask.question, "options": list(ask.options)}
                         for ask in clarification.asks

@@ -64,6 +64,8 @@ from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, text
 
+from sqlagent.clarify import CLARIFICATION_ERROR
+
 logger = logging.getLogger(__name__)
 
 SCHEMA = """
@@ -325,19 +327,40 @@ class Store:
         return [_to_entry(row) for row in rows]
 
     def stats(self) -> dict:
-        """Aggregate numbers across every question ever asked."""
+        """Aggregate numbers across every question ever asked.
+
+        A turn where the agent asked a clarifying question is stored with
+        ``ok = 0`` — no answer was produced — and is **not** counted against the
+        success rate. It was counted, and after ``ambiguity_handling`` defaulted
+        to ``ask_human`` the sidebar started reporting 65% answered on a system
+        where 31% of turns were the agent asking something back and almost
+        nothing had actually failed.
+
+        Clarifications are reported separately instead, because the rate the
+        agent asks at is worth knowing and is not the rate it breaks at.
+        """
         with self._engine.connect() as connection:
             row = connection.execute(
                 text(
-                    "SELECT count(*), sum(ok), avg(seconds), sum(tokens) FROM history"
-                )
+                    "SELECT count(*), sum(ok), avg(seconds), sum(tokens), "
+                    "sum(CASE WHEN error = :clarified THEN 1 ELSE 0 END) "
+                    "FROM history"
+                ),
+                {"clarified": CLARIFICATION_ERROR},
             ).fetchone()
 
         total = row[0] or 0
+        successful = row[1] or 0
+        clarified = row[4] or 0
+        # Turns where an answer was actually attempted. A clarification was not
+        # an attempt — it is the agent declining to guess.
+        attempted = total - clarified
+
         return {
             "total": total,
-            "successful": row[1] or 0,
-            "success_rate": (row[1] or 0) / total if total else 0.0,
+            "successful": successful,
+            "clarified": clarified,
+            "success_rate": successful / attempted if attempted else 0.0,
             "mean_seconds": round(row[2], 2) if row[2] else 0.0,
             "total_tokens": row[3] or 0,
         }

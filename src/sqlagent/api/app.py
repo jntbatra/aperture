@@ -65,6 +65,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine
 from starlette.concurrency import run_in_threadpool
 
+from sqlagent.clarify import CLARIFICATION_ERROR
 from sqlagent.config import OVERRIDABLE, Settings, settings
 from sqlagent.conversation import Turn, carryable_result
 from sqlagent.ingest import IngestError, ingest_file
@@ -284,6 +285,13 @@ class SuggestionsResponse(BaseModel):
 class StatsResponse(BaseModel):
     total: int
     successful: int
+    clarified: int
+    """Turns where the agent asked a question back instead of answering.
+
+    Reported separately and excluded from ``success_rate``. Counted as failures
+    it read as a collapse: 65% answered on a system where almost nothing had
+    failed and a third of turns were the agent declining to guess."""
+
     success_rate: float
     mean_seconds: float
     total_tokens: int
@@ -711,7 +719,7 @@ def _load_history(conversation_id: str | None) -> list[Turn]:
                 # A turn that asked something is owed a reply, and the next
                 # message is it. Without this the turn reads as a failure.
                 clarification=(
-                    entry.answer if entry.error == "needs_clarification" else None
+                    entry.answer if entry.error == CLARIFICATION_ERROR else None
                 ),
             )
             for entry in get_store().conversation_entries(conversation_id)

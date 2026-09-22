@@ -46,16 +46,95 @@ exists *and* a test covers it — a ticket is not closed by a plan.
 
 ---
 
+## Closed in this pass
+
+| # | Ticket | Evidence |
+|---|---|---|
+| 28 | Conversation summarisation beyond the window | `summarise.py`, `tests/test_summarise.py` (26), wiring in `tests/test_toggles.py` (8) |
+| 29 | Drift detection | `drift.py`, `tests/test_drift.py` (33), `GET /api/drift`, `tests/test_api.py` (5) |
+| 30 | LLM-as-judge for answer quality | `judge.py`, `tests/test_judge.py` (21), `--judge` on the BIRD harness, `tests/test_bench_report.py` (6) |
+| 35 | Nothing committed to git | one commit, `.env` / history DB / uploaded datasets excluded, `.env.example` added |
+| 40 | Three hand-maintained copies of the toggle list | `tests/test_api.py` — `OVERRIDABLE`, `AskOptions` and `TOGGLE_DESCRIPTIONS` are now checked against each other |
+| 41 | Client guessed which toggles were numeric | `ToggleInfo.numeric`, declared by the server |
+| 43 | Clarifications counted as failures in drift and in the sidebar | `clarify.CLARIFICATION_ERROR`, `drift.clarify_rate`, `store.stats`, tests in `test_drift.py` and `test_store.py` |
+| 44 | `"needs_clarification"` written out as a literal in four places | one constant in `clarify.py`, imported by the graph, the pipeline, the API and drift |
+
+---
+
 ## Open
 
 | # | Ticket | State |
 |---|---|---|
-| 25 | Multi-agent Manager + Analyst/Research/Compute | **won't build** — see below |
-| 26 | Sandboxed code interpreter | **won't build** — see below |
-| 27 | Research agent / web search | **won't build** — see below |
-| 28 | Conversation summarisation beyond the 4-turn window | open |
-| 29 | Drift detection | open |
-| 30 | LLM-as-judge for answer quality | open |
-| 34 | Ambiguity check is nondeterministic and unmeasured | open |
-| 35 | Nothing committed to git | open |
-| 39 | A query can answer a different question than the one asked | open |
+| 34 | Ambiguity check is nondeterministic | **instrument built, not run** |
+| 39 | A query can answer a different question than the one asked | **instrument built, not run** |
+| 42 | `ruff format --check` fails repo-wide | open |
+
+### 34 — ambiguity stability
+
+`benchmarks/ambiguity.py` asks the same question *k* times and reports how
+often the clarifier agrees with itself, alongside a labelled 30-question set
+(15 vague, 15 clear) in `benchmarks/ambiguity_questions.json`. Stability is the
+number that matters: it needs no ground truth and cannot be argued with, unlike
+the accuracy figure beside it.
+
+30 questions x k=5 is 150 model calls and no database work.
+
+**Not run** — benchmark runs are paused by request. The aggregation is tested
+(`tests/test_ambiguity_harness.py`, 17 tests); the model calls are not.
+
+### 39 — answering a different question
+
+`judge.py` detects this offline, and `--judge` reports "correct but badly
+answered" — right rows, wrong write-up — which nothing else in the harness can
+surface. The open decision is whether the critic should default to on, and that
+needs a measured run with and without it.
+
+**Not run**, same reason.
+
+### What running the drift detector found
+
+Pointed at this project's own history on its first run, it reported the failure
+rate rising from **1.6% to 35%**. Thirty-one of those thirty-five "failures"
+were the agent asking a clarifying question — doing exactly what switching
+`ambiguity_handling` to `ask_human` configured it to do. The metric was
+measuring a settings change and calling it a regression.
+
+Two things were wrong, both now fixed (#43, #44): a clarification is stored
+with `ok = 0` because no answer was produced, and three separate places
+compared against the string `"needs_clarification"` by hand. The sidebar had
+the same bug and was reporting **78% answered** on a system where almost
+nothing had failed.
+
+Corrected, the same window reads:
+
+| | baseline (62) | recent (100) |
+|---|---|---|
+| failure_rate | 1.6% | 4.0% — not significant |
+| clarify_rate | 0.0% | **31.0%** (p < 0.0001) |
+| slow_rate | 9.7% | **37.0%** (p = 0.0001) |
+| costly_rate | 9.7% | **33.0%** (p = 0.0007) |
+
+All three shifts are explained: `ask_human` became the default, and the model
+changed to `gemma-4-31b` with a glossary in every prompt. That is the intended
+use — the detector says *something changed*, and a human says what.
+
+### 42 — repo-wide formatting
+
+`make lint` runs `ruff check` (clean) and `ruff format --check`, which fails on
+40 files. This is pre-existing and includes files untouched in this pass; the
+code is hand-formatted and `ruff format` would reflow a lot of deliberately
+laid-out prose and comments. Fixing it means either accepting a large
+whitespace diff or dropping the format check. Not decided.
+
+---
+
+## Won't build, and why
+
+| # | Ticket | Why not |
+|---|---|---|
+| 25 | Multi-agent Manager + Analyst/Research/Compute | The pipeline is engineer-planned: the steps a SQL question needs are known in advance and encoded as a graph. A manager would re-derive that plan on every question, at a model call each, and get it wrong sometimes. Multi-agent buys flexibility this problem does not need, and pays for it in the property that matters most here — that the SQL is readable next to the answer. |
+| 26 | Sandboxed code interpreter | A separate security project, not a feature. The whole safety argument of this system is that the only thing reaching the database is a statement proven to be a SELECT by a parser. Arbitrary Python alongside it makes every one of those guarantees conditional on the sandbox instead. |
+| 27 | Research agent / web search | Every answer here traces to a row in a named table, which is why the SQL is shown. A retrieved web page does not, and an answer mixing the two is exactly as checkable as its weakest source while looking uniformly authoritative. |
+
+These are decisions, not a backlog. Reopening one means arguing with the reason
+above, which is the point of writing it down.

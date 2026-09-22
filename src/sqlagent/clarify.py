@@ -101,6 +101,16 @@ hold real alternatives, not "please clarify". At most 3 entries.
 """
 
 
+CLARIFICATION_ERROR = "needs_clarification"
+"""The ``error`` marker a turn carries when the agent asked instead of answered.
+
+One constant because four places compare against it — the graph that sets it,
+the pipeline that sets it on the decomposition path, the API that renders a
+clarification differently from a failure, and drift detection that must not
+count it as one. It was a literal string in each, and the fourth got it right
+only by luck.
+"""
+
 MAX_ASKS = 3
 """Bound on how many things to ask at once.
 

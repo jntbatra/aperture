@@ -374,3 +374,76 @@ def test_a_store_written_before_conversations_existed_is_migrated(tmp_path):
     questions = [e.question for e in store.search_turns("asked")]
     assert "asked before the upgrade" in questions
     assert "asked after the upgrade" in questions
+
+
+# --------------------------------------------------------------------------
+# Clarifications are not failures
+#
+# A clarification is stored with ok = 0 — no answer was produced — and counting
+# it against the success rate made the sidebar report 65% answered on a system
+# where almost nothing had failed and a third of turns were the agent declining
+# to guess.
+# --------------------------------------------------------------------------
+
+
+def test_a_clarification_does_not_lower_the_success_rate(tmp_path):
+    from sqlagent.clarify import CLARIFICATION_ERROR
+    from sqlagent.store import Store
+
+    store = Store(tmp_path / "s.db")
+    for _ in range(7):
+        store.record_question(question="q", answer="a", sql="SELECT 1", ok=True)
+    for _ in range(3):
+        store.record_question(
+            question="vague", answer="which one?", sql=None,
+            ok=False, error=CLARIFICATION_ERROR,
+        )
+
+    stats = store.stats()
+
+    assert stats["total"] == 10
+    assert stats["clarified"] == 3
+    assert stats["success_rate"] == 1.0
+
+
+def test_a_real_failure_still_lowers_the_success_rate(tmp_path):
+    """Excluding clarifications must not mask what the rate is for."""
+    from sqlagent.store import Store
+
+    store = Store(tmp_path / "s.db")
+    for _ in range(3):
+        store.record_question(question="q", answer="a", sql="SELECT 1", ok=True)
+    store.record_question(
+        question="q", answer=None, sql=None, ok=False, error="syntax error"
+    )
+
+    assert store.stats()["success_rate"] == 0.75
+
+
+def test_a_history_of_nothing_but_clarifications_is_not_a_zero_percent_system(tmp_path):
+    """Every turn excluded leaves nothing to divide by. Zero attempts is not
+    zero successes."""
+    from sqlagent.clarify import CLARIFICATION_ERROR
+    from sqlagent.store import Store
+
+    store = Store(tmp_path / "s.db")
+    store.record_question(
+        question="vague", answer="which?", sql=None, ok=False, error=CLARIFICATION_ERROR
+    )
+
+    stats = store.stats()
+
+    assert stats["success_rate"] == 0.0
+    assert stats["clarified"] == 1
+
+
+def test_recent_turns_come_back_newest_first(tmp_path):
+    """Drift splits this list by position. Reversed, it compares the baseline
+    against itself and reports calm."""
+    from sqlagent.store import Store
+
+    store = Store(tmp_path / "s.db")
+    for index in range(5):
+        store.record_question(question=f"q{index}", answer="a", sql="SELECT 1", ok=True)
+
+    assert [t.question for t in store.recent_turns(limit=3)] == ["q4", "q3", "q2"]
