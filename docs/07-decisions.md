@@ -865,6 +865,39 @@ Three things that make it cheap enough to be on by default:
 The cap is enforced on the reply, not requested in the prompt. A cap the model
 is merely told about is not a cap.
 
+### Measured on the live database, with and without
+
+Five turns against the production database, `conversation_window=2` so the first turn is out of
+the window by the fifth:
+
+    turn 1: Only count DELIVERED orders from now on, and exclude any test
+            accounts. How many orders were placed in June 2026?
+    turn 2: How many distinct items exist in the items table?
+    turn 3: How many kitchen_profiles rows are there?
+    turn 4: How many coupon_usages rows are there?
+    turn 5: And how many orders in July 2026?
+
+Turn 5, **summarisation on**:
+
+```sql
+SELECT COUNT(DISTINCT orders.id) FROM orders
+WHERE orders.status = 'DELIVERED' AND orders."isTest" = FALSE
+  AND EXTRACT(YEAR FROM orders."createdAt") = 2026
+  AND EXTRACT(MONTH FROM orders."createdAt") = 7
+```
+
+Turn 5, **summarisation off**, same five questions:
+
+```sql
+SELECT COUNT(DISTINCT orders.id) FROM orders
+WHERE EXTRACT(YEAR FROM orders."createdAt") = 2026
+  AND EXTRACT(MONTH FROM orders."createdAt") = 7
+```
+
+Both constraints gone. **A 37% overstatement**, reported
+against June's constrained figure as though the two were comparable, with
+nothing in the answer indicating the population had changed.
+
 ---
 
 ## Current state, honestly
