@@ -153,6 +153,7 @@ top and work down.
 | 5 | [The web interface](docs/05-frontend.md) | React app, streaming, the design system |
 | 6 | [Running it](docs/06-operations.md) | Configuration, deployment, benchmarking, troubleshooting |
 | 7 | [Decisions and measurements](docs/07-decisions.md) | Every significant choice, what it cost, what it bought |
+| — | [Aperture as a service](SAAS.md) | The five fronts, multi-tenancy, tiers, and what a hosted deployment needs |
 | — | [Tickets](TICKETS.md) | Every decision as a ticket with its real status: done, open, or won't-build with the reason |
 
 ---
@@ -199,7 +200,15 @@ sql-agent/
 │   ├── prompts.py           Every prompt, version-controlled
 │   ├── agent_graph.py       LangGraph state graph: nodes, edges, both repair loops
 │   ├── pipeline.py          SqlAgent public surface, the trace, the individual steps
-│   └── cli.py               Terminal interface
+│   ├── cli.py               Terminal interface
+│   └── saas/                Who is asking, and whose data they may reach
+│       ├── tenancy.py           Tenant, ApiKey, Principal; keys stored hashed
+│       ├── passwords.py         scrypt — deliberately not the API-key hash
+│       ├── secrets.py           Fernet for tenant connection strings
+│       ├── connect.py           Prove a role cannot write, before saving it
+│       ├── plans.py             Tiers as data: limits, budgets, clamping
+│       ├── auth.py              One resolution path for all five fronts
+│       └── control.py           Accounts and entitlements, a separate database
 ├── frontend/            React + TypeScript web interface
 │                        (schema graph drawn with React Flow)
 ├── benchmarks/

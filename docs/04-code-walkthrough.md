@@ -677,6 +677,147 @@ each.
 
 ---
 
+## `saas/` — who is asking, and whose data they may reach
+
+A separate package because the boundary it draws is worth being able to see.
+Everything in `sqlagent` proper answers "what is the right SQL for this
+question"; everything here answers "may this caller ask it at all, and against
+what". Mixing them is how a scoping check ends up somewhere it can be
+forgotten.
+
+### `tenancy.py` — identity
+
+`Tenant`, `ApiKey`, `Principal`. Keys are `prefix.secret`; only the hash of the
+secret is stored, so a dump of the table names the customers without letting
+the reader become one.
+
+The prefix is stored in clear **because it is the lookup key**. Without it,
+verifying one presented key means hashing it against every row, on the hot path
+of every request on every front. Comparison is `hmac.compare_digest` — `==` on
+a hash leaks how many leading bytes matched.
+
+There is no anonymous `Principal` and no `tenant_id = None`. The absence of a
+principal is the absence of a principal, so nothing downstream has to remember
+to check.
+
+### `passwords.py` — and why it is not the same as the above
+
+```python
+# tenancy.py
+def hash_secret(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+# passwords.py
+SCRYPT_N = 2**15
+```
+
+These look inconsistent and are not. An API key is 256 bits of randomness this
+system generated: no dictionary, no reuse, nothing for a work factor to buy,
+and the cost of a KDF would be paid on every request. A password is short,
+human-chosen and probably reused, so making each guess expensive is the *entire*
+defence. Getting the two the same way round is a common and expensive mistake.
+
+Cost parameters live inside the stored hash — `scrypt$n$r$p$salt$hash` — so
+raising them later does not lock anyone out. `needs_rehash` upgrades a password
+at sign-in, the only moment the plaintext exists to rehash with. A scheme that
+reads its parameters from a constant cannot raise them, so in practice it never
+does. Measured at 63ms.
+
+### `secrets.py` — tenant connection strings
+
+Fernet, which is authenticated: a tampered ciphertext fails to decrypt rather
+than producing attacker-chosen plaintext — and the plaintext here is fed to a
+database driver.
+
+A missing key is a hard failure **at construction**, never a silent fallback to
+plaintext. That fallback is the shape of every "we encrypt your credentials"
+claim that turns out not to be true: it works, nothing errors, and the property
+was lost the day someone forgot to set a variable.
+
+`MultiFernet` rotation is designed in now, because retrofitting it means a
+migration with an outage in it.
+
+### `connect.py` — proving a role cannot write
+
+The strongest check in the system, and the reasoning is worth repeating: every
+other defence is code in this process, and code in this process is the thing
+most likely to have a bug in it. The connected role is enforced by the database,
+on the other side of the network, by software nobody here wrote.
+
+Four probes — `CREATE TABLE`, `INSERT`, `UPDATE`, `DELETE` — inside a
+transaction that is rolled back. Each is written as a no-op (`WHERE 1 = 0`), so
+a probe that is wrongly permitted *and* whose rollback fails still changes
+nothing. Writing a probe that would do damage in order to find out whether
+damage is possible is not an acceptable design.
+
+### `plans.py` — tiers as data
+
+`Plan` is a record of numbers; enforcement reads it. The alternative —
+`if plan == "pro"` through the request path — puts pricing policy in a dozen
+files, and the day a limit changes one of them is missed.
+
+`UNLIMITED = -1` rather than `None`, because `None` invites
+`if limit and used > limit`, which is right for None and silently wrong for a
+limit of 0: a plan meant to allow nothing would allow everything.
+
+`plan_for()` resolves an unknown name to **FREE**, not to the most permissive.
+A typo, a renamed plan or a row written by an older version should under-serve
+rather than hand out an enterprise entitlement.
+
+### `auth.py` — one door, five entrances
+
+Session cookie, API key, MCP token, CLI and SDK all arrive here and leave as a
+`Principal` or as an exception. Every failure produces the *same* message:
+unknown prefix, wrong secret, revoked key and missing tenant are
+indistinguishable to the caller and distinguished in the logs, because telling
+them apart tells an attacker when they have found a real key.
+
+Suspension is the single exception — they authenticated, so saying the
+workspace is suspended leaks nothing, and leaving them to debug a generic 401
+against a working credential is cruel.
+
+### `control.py` — accounts, credentials, entitlements
+
+A **different database** from the history store. One holds tenant data, the
+other holds the credentials that decide who may reach it; sharing them means the
+credential that reads question history is the same one that can grant an
+enterprise plan.
+
+Two details worth naming:
+
+```sql
+INSERT INTO usage (...) VALUES (...)
+ON CONFLICT (tenant_id, period, kind) DO UPDATE SET count = usage.count + :amount
+```
+
+An upsert, not read-modify-write. Two questions answered at the same instant on
+two workers would otherwise both read the old value and write the same new one,
+and the tenant gets one free. At scale that is not a rounding error.
+
+```sql
+SELECT encrypted_dsn FROM connections WHERE id = :id AND tenant_id = :tenant
+```
+
+The tenant is **in the WHERE clause**, not checked by the caller. A check and a
+write in two statements is a check the third call site skips, and getting this
+one wrong hands a customer's database credential to another customer.
+
+### `api/auth_routes.py` — the dependency
+
+`PrincipalDep` is declared by every route that touches tenant data, and the test
+that guarantees it walks the app's own route table rather than a hand-written
+list — a hand-written list would be missing exactly the route that was missing
+from the code.
+
+In single-tenant mode it returns a real `Principal(tenant_id="local")` rather
+than None, so every scoping path runs identically in both modes. Code that only
+executes when multi-tenancy is on is code whose bugs are found by customers.
+
+`enforce_and_clamp` is called by both ask handlers, because two handlers
+answering questions means two places a quota can be forgotten.
+
+---
+
 ## `benchmarks/bird.py` — measuring it
 
 ### Comparing result sets, not SQL text

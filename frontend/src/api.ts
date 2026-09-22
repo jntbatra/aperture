@@ -72,6 +72,10 @@ export interface HealthResponse {
   schema_version: string;
   light_model: string;
   strong_model: string;
+  /** Whether this deployment requires a tenant. Reported so "is this instance
+   *  open?" is answerable without reading a container's environment. */
+  auth_required: boolean;
+  encryption_configured: boolean;
 }
 
 export interface GraphNode {

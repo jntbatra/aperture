@@ -513,6 +513,21 @@ class HealthResponse(BaseModel):
     light_model: str
     strong_model: str
 
+    auth_required: bool = False
+    """Whether every request must resolve to a tenant.
+
+    Reported because "is this deployment open?" must be answerable without
+    reading the environment of a running container. A hosted instance that
+    quietly came up with authentication off looks identical to one that did
+    not, from the outside, until someone notices — and the whole point of a
+    health endpoint is that a machine can check.
+    """
+
+    encryption_configured: bool = False
+    """Whether a key is loaded for tenant credentials. Never the key, and never
+    how many — only that there is one, which is what a readiness probe needs to
+    refuse traffic to an instance that cannot decrypt anything."""
+
 
 def to_response(result: AgentResult, conversation_id: str | None = None) -> AskResponse:
     query = result.result
@@ -674,6 +689,8 @@ def health(agent: AgentDep) -> HealthResponse:
         schema_version=agent.snapshot.version,
         light_model=config.light_model,
         strong_model=config.strong_model,
+        auth_required=config.require_auth,
+        encryption_configured=bool(config.secret_key),
     )
 
 

@@ -61,6 +61,82 @@ Both tiers default to the same model because it measured fastest *and* most
 accurate — see [07-decisions.md](07-decisions.md#model-selection). The split
 exists for the case where a cheaper model is worth its accuracy loss.
 
+### Multi-tenancy
+
+```bash
+SQLAGENT_REQUIRE_AUTH=false             # every request must resolve to a tenant
+SQLAGENT_CONTROL_DATABASE_URL=""        # accounts; empty means <data_dir>/control.db
+SQLAGENT_SECRET_KEY=""                  # Fernet key for tenant credentials
+SQLAGENT_SESSION_COOKIE=aperture_session
+SQLAGENT_SECURE_COOKIES=false           # true behind TLS, which is everywhere but a laptop
+```
+
+`REQUIRE_AUTH` off is the single-tenant deployment: one configured database, no
+accounts, exactly as the API has always behaved. On, there is no
+unauthenticated path at all. `GET /api/health` reports `auth_required` and
+`encryption_configured`, so "is this instance open?" is answerable by a machine
+without reading a container's environment.
+
+`SECRET_KEY` is required when auth is on. Generate one with:
+
+```bash
+.venv/bin/python -c "from sqlagent.saas.secrets import Cipher; print(Cipher.generate_key())"
+```
+
+In production it comes from KMS or Secrets Manager through the task role, never
+from a variable baked into an image. A missing key is a hard failure rather
+than a silent fallback to storing tenant connection strings in clear.
+
+`SECURE_COOKIES` is false locally only because a Secure cookie is silently
+dropped over plain HTTP, and the resulting "sign-in does nothing" is a
+genuinely hard thing to diagnose.
+
+### Models and transport
+
+```bash
+SQLAGENT_MANTLE_BASE_URL=""             # overrides the derived Mantle URL
+SQLAGENT_MANTLE_SIGNING_SERVICE=bedrock # the SigV4 service name
+SQLAGENT_LLM_API_KEY=""                 # only for `bearer` auth; local servers
+SQLAGENT_MAX_TOKENS=4096                # output cap per model call
+SQLAGENT_REQUEST_TIMEOUT_SECONDS=120
+SQLAGENT_MAX_RETRIES=3
+SQLAGENT_CRITIC_MODEL=""                # empty means strong_model
+SQLAGENT_VOTE_TEMPERATURE=0.3           # voting at 0 is N identical strings
+```
+
+`VOTE_TEMPERATURE` is the one to understand: the default `temperature` stays at
+0 so ordinary questions are reproducible, and this applies *only* to voting
+samples. That is the trade stated explicitly — reproducibility is given up for
+the questions voting is on for, and kept everywhere else.
+
+### Guards and caching
+
+```bash
+SQLAGENT_MAX_PLAN_COST=1000000          # EXPLAIN cost ceiling; 0 disables
+SQLAGENT_MAX_PLAN_ROWS=5000000
+SQLAGENT_CHECK_INFLATED_AGGREGATES=true # warn when a join may multiply a SUM
+SQLAGENT_CHECK_ANSWER_FAITHFULNESS=true # figures in the answer must be in the rows
+SQLAGENT_CACHE_SQL=true                 # reuse SQL, never rows
+SQLAGENT_CACHE_MAX_ENTRIES=512
+SQLAGENT_STORED_RESULT_ROWS=50          # rows kept per turn for the UI
+SQLAGENT_LOG_LEVEL=INFO
+```
+
+The two `CHECK_` flags default on and should stay on: both caught real wrong
+numbers on real data, and both are static or textual rather than extra model
+calls, so they cost nothing per question.
+
+### Value profiling
+
+```bash
+SQLAGENT_VALUE_PROFILING=false          # per-column value profiles in the prompt
+SQLAGENT_PROFILE_ROWS=1000
+SQLAGENT_MAX_DISTINCT_VALUES=20
+```
+
+Off by default, and that is a measured decision rather than an oversight — see
+[07-decisions.md](07-decisions.md) on the four interventions that did not work.
+
 ### Conversation memory
 
 ```bash
@@ -255,6 +331,11 @@ the database, and adding a passthrough would make the validator optional.
 | `GET` | `/api/schema` | Tables and columns, as reflected |
 | `GET` | `/api/schema/graph` | Tables and foreign keys, for the graph view |
 | `GET` | `/api/options` | The quality toggles: labels, help, costs, choices, defaults |
+| `POST` | `/api/auth/sign-up` | Create a workspace and its first user; sets the session cookie |
+| `POST` | `/api/auth/sign-in` | Sign in; sets the session cookie |
+| `POST` | `/api/auth/sign-out` | Delete the session server-side, then clear the cookie |
+| `GET` | `/api/auth/me` | Who the caller is: workspace and plan |
+| `GET` | `/api/usage` | This period's allowance and what is left of it |
 | `POST` | `/api/ask` | Ask a question. Returns the answer, the SQL, the rows and the trace |
 | `POST` | `/api/ask/stream` | The same, as Server-Sent Events, so the UI can show progress |
 | `GET` | `/api/conversations` | Threads, newest first |
