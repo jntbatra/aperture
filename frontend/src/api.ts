@@ -13,7 +13,14 @@
  * takes the question as a query parameter rather than a body.
  */
 
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+/** Same origin by default.
+ *
+ *  The dev server proxies `/api` to the backend and production serves both
+ *  from one domain, so the browser never makes a cross-origin request and the
+ *  session cookie is always first-party. Pointing this at another origin
+ *  brings back `SameSite` and CORS, and is only useful for a deployment that
+ *  genuinely splits the two. */
+const BASE = import.meta.env.VITE_API_URL ?? '';
 
 export interface AskResponse {
   question: string;
@@ -228,9 +235,39 @@ export const STAGE_LABELS: Record<Stage, string> = {
   answering: 'Writing the answer',
 };
 
+/** Raised when the server refuses for a reason the UI must act on, rather than
+ *  merely report. 401 means "sign in"; 402 means "you are out of allowance".
+ *  A generic Error would make both of those a red toast. */
+export class ApiError extends Error {
+  /** Declared and assigned rather than a constructor parameter property: this
+   *  project builds with `erasableSyntaxOnly`, which rejects the shorthand
+   *  because it emits code rather than only erasing types. */
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+
+  get needsAuth(): boolean {
+    return this.status === 401;
+  }
+
+  get outOfQuota(): boolean {
+    return this.status === 402;
+  }
+}
+
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    // The session is an httpOnly cookie on a different origin in development,
+    // so it is only sent when credentials are included. Without this the
+    // server issues a session, the browser stores it, and every subsequent
+    // request arrives unauthenticated — which looks exactly like a broken
+    // login and is nothing of the sort.
+    credentials: 'include',
     ...init,
   });
 
@@ -244,7 +281,9 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* response had no JSON body; the status-based message stands */
     }
-    throw new Error(message);
+    // Typed, so a caller can distinguish "sign in" from "out of allowance"
+    // from "something went wrong". As a bare Error all three are a red toast.
+    throw new ApiError(message, response.status);
   }
 
   return response.json() as Promise<T>;
@@ -364,6 +403,45 @@ export interface PlanInfo {
 }
 
 export const getPlans = () => json<PlanInfo[]>('/api/plans');
+
+export interface Account {
+  tenant_id: string;
+  workspace: string;
+  email: string;
+  plan: string;
+  plan_label: string;
+}
+
+export interface UsageInfo {
+  period: string;
+  plan: string;
+  questions_used: number;
+  questions_limit: number;
+  detailed_used: number;
+  detailed_limit: number;
+  connected_databases: number;
+  connected_limit: number;
+}
+
+export const signUp = (email: string, password: string, workspace = '') =>
+  json<Account>('/api/auth/sign-up', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, workspace }),
+  });
+
+export const signIn = (email: string, password: string) =>
+  json<Account>('/api/auth/sign-in', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+
+export const signOut = () => json<{ signed_out: boolean }>('/api/auth/sign-out', {
+  method: 'POST',
+});
+
+export const getAccount = () => json<Account>('/api/auth/me');
+
+export const getUsage = () => json<UsageInfo>('/api/usage');
 
 export const getDrift = (recent = 100, baseline = 300) =>
   json<DriftReport>(`/api/drift?recent=${recent}&baseline=${baseline}`);

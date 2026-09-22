@@ -29,3 +29,15 @@ benchmarks/downloads/
 # is source, and neither belongs in a repository.
 data/sqlagent.db
 data/datasets/
+
+# The control plane: password hashes, session tokens, encrypted tenant
+# credentials. Every one of those is a secret, and a database of them in a
+# repository is a database of them in every clone, every fork and every
+# backup of every laptop that ever checked it out.
+#
+# Matched by name and by pattern, because the next one will be called
+# something else.
+data/control.db
+data/*.db
+*.sqlite
+*.sqlite3

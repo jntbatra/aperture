@@ -514,6 +514,54 @@ class Settings(BaseSettings):
     which reads exactly like an entitlement error and is not one.
     """
 
+    # ----------------------------------------------------------------
+    # Multi-tenancy
+    #
+    # Off by default. A single-tenant deployment — the CLI, the benchmark, a
+    # team running this against their own warehouse — should not have to think
+    # about accounts, and turning authentication on is a deliberate act.
+    # ----------------------------------------------------------------
+
+    require_auth: bool = False
+    """Whether every request must resolve to a tenant.
+
+    When False the API behaves exactly as it always has: one configured
+    database, no accounts. When True there is no unauthenticated path at all.
+
+    The default is False and that is a deployment decision, not a safety
+    opinion. A hosted deployment sets it True, and `/api/health` reports which
+    mode it is in so the answer is never a guess.
+    """
+
+    control_database_url: str = ""
+    """Where accounts, credentials and entitlements live. Empty means
+    ``<data_dir>/control.db``.
+
+    Deliberately a *different* database from the history store: one holds
+    tenant data, the other holds the credentials that decide who may reach it.
+    Sharing them means the credential that reads question history is the same
+    one that can grant an enterprise plan.
+    """
+
+    secret_key: str = ""
+    """Fernet key for tenant database credentials.
+
+    Required when ``require_auth`` is on; a missing key is a hard failure
+    rather than a silent fallback to storing connection strings in clear.
+    Generate one with ``Cipher.generate_key()``; in production it comes from
+    KMS or Secrets Manager via the task role, never from an environment
+    variable baked into an image.
+    """
+
+    session_cookie: str = "aperture_session"
+    secure_cookies: bool = False
+    """Set True behind TLS, which is everywhere except a developer's laptop.
+
+    False locally because a Secure cookie is silently dropped over plain HTTP,
+    and the resulting "sign-in does nothing" is a genuinely hard thing to
+    diagnose.
+    """
+
     llm_api_key: str = ""
     """Bearer token for ``llm_base_url``. Many local servers accept anything.
 

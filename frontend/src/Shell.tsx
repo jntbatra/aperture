@@ -1,93 +1,155 @@
 /**
- * Which page is showing.
+ * Which screen is showing, and whether the visitor may see it.
  *
- * Why there is no router library
- * ------------------------------
- * There are five screens and no nested routes, no route params, no loaders.
- * `react-router` would add a dependency, a provider and a mental model in
- * exchange for URL syncing this app does not currently need — the console is
- * one page with its own state, and the marketing pages are read in order.
+ * Gating happens here and is enforced elsewhere
+ * ---------------------------------------------
+ * This file decides what to *render*. It is not the security boundary — the
+ * boundary is `PrincipalDep` on every data route, and a determined visitor
+ * can render whatever they like from DevTools. What this file must not do is
+ * show a working console to someone the server will refuse, because that
+ * produces an interface full of red errors instead of a sign-in page.
  *
- * This is a decision that expires. The moment a screen needs to be linkable —
- * a shared conversation, a plan deep-link from an email — a real router earns
- * its place, and this file is the seam where it goes in.
+ * Single-tenant deployments need no special case
+ * ----------------------------------------------
+ * When the server runs with `require_auth=false`, `/api/auth/me` answers
+ * without a credential and reports the local workspace, so the session check
+ * below resolves to `signed-in` and the console opens directly. That is why
+ * the server returns a real principal in that mode rather than None: it means
+ * this file has one code path, and the hosted path is the one that gets
+ * exercised locally every day.
  *
- * Why the console is not lazy-loaded
- * ----------------------------------
- * It is the reason people are here. Splitting it out makes the landing page
- * marginally faster and the first real interaction slower, which is the wrong
- * trade for a tool people sign into and then use all day.
+ * Why there is still no router library
+ * ------------------------------------
+ * Six screens, no nested routes, no route params. The moment a screen needs to
+ * be linkable — a shared conversation, a plan deep-link from an email — a real
+ * router earns its place and this file is the seam where it goes in.
  */
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import App from './App';
+import { Account } from './pages/Account';
 import { Auth, type AuthMode } from './pages/Auth';
 import { Checkout } from './pages/Checkout';
 import { Landing } from './pages/Landing';
 import { Pricing } from './pages/Pricing';
-import type { PlanInfo } from './api';
+import { ApiError, signIn, signUp, type PlanInfo } from './api';
+import { loadSession, type SessionState } from './session';
 
 type Screen = 'landing' | 'pricing' | 'auth' | 'checkout' | 'console';
 
-/** Where an unauthenticated visitor starts.
- *
- *  `console` while the API has no authentication, because gating the one
- *  working thing behind a login that does not exist yet would make the product
- *  unusable to demonstrate its own login page. This constant is the single
- *  line to change when `saas/auth.py` is wired into the API — and naming it
- *  is how that stays a deliberate switch rather than something to hunt for. */
-const START: Screen = 'console';
-
 export function Shell() {
-  const [screen, setScreen] = useState<Screen>(START);
+  const [session, setSession] = useState<SessionState>({ status: 'checking' });
+  const [screen, setScreen] = useState<Screen>('landing');
   const [mode, setMode] = useState<AuthMode>('sign-up');
   const [chosen, setChosen] = useState<PlanInfo | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const next = await loadSession();
+    setSession(next);
+    if (next.status === 'signed-in') setScreen('console');
+    return next;
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  /* `checking` is a real state. Collapsing it into "signed out" flashes a
+     sign-in screen on every reload for users who are perfectly signed in —
+     the same class of bug as the dark-mode flash. */
+  if (session.status === 'checking') {
+    return <div className="boot">Loading…</div>;
+  }
 
   const choose = (plan: PlanInfo) => {
     setChosen(plan);
-    setScreen(plan.price_monthly_usd === 0 && !plan.custom_priced ? 'auth' : 'checkout');
-    if (plan.price_monthly_usd === 0) setMode('sign-up');
+    if (session.status !== 'signed-in' && !plan.custom_priced && plan.price_monthly_usd === 0) {
+      setMode('sign-up');
+      setScreen('auth');
+      return;
+    }
+    setScreen('checkout');
   };
 
-  if (screen === 'console') return <App onExit={() => setScreen('landing')} />;
+  const submit = async (nextMode: AuthMode, email: string, password: string) => {
+    try {
+      if (nextMode === 'sign-up') await signUp(email, password);
+      else await signIn(email, password);
+    } catch (error) {
+      // Returned rather than thrown: the form renders it inline, and a wrong
+      // password is an ordinary outcome of a sign-in, not an exception.
+      return error instanceof ApiError ? error.message : 'Something went wrong.';
+    }
+    await refresh();
+    return null;
+  };
 
-  if (screen === 'landing') {
+  if (screen === 'console' && session.status === 'signed-in') {
     return (
-      <Landing
-        onStart={() => {
-          setMode('sign-up');
-          setScreen('auth');
-        }}
-        onPricing={() => setScreen('pricing')}
-        onSignIn={() => {
-          setMode('sign-in');
-          setScreen('auth');
-        }}
-      />
+      <>
+        <App
+          onExit={() => setScreen('pricing')}
+          account={session.account}
+          onAccount={() => setAccountOpen(true)}
+        />
+        {accountOpen && (
+          <Account
+            account={session.account}
+            onClose={() => setAccountOpen(false)}
+            onUpgrade={() => {
+              setAccountOpen(false);
+              setScreen('pricing');
+            }}
+            onSignedOut={() => {
+              setAccountOpen(false);
+              setSession({ status: 'signed-out' });
+              setScreen('landing');
+            }}
+          />
+        )}
+      </>
     );
   }
 
-  if (screen === 'pricing') return <Pricing onChoose={choose} />;
+  if (screen === 'pricing') {
+    return <Pricing onChoose={choose} />;
+  }
 
   if (screen === 'checkout' && chosen) {
     return <Checkout plan={chosen} onBack={() => setScreen('pricing')} />;
   }
 
+  if (screen === 'auth') {
+    return (
+      <Auth
+        mode={mode}
+        onModeChange={setMode}
+        onBack={() => setScreen('landing')}
+        onSubmit={submit}
+      />
+    );
+  }
+
   return (
-    <Auth
-      mode={mode}
-      onModeChange={setMode}
-      onBack={() => setScreen('landing')}
-      /* Returns the reason it did not work rather than throwing, because the
-         form renders it inline and an unfinished backend is a normal answer
-         here, not an exception. */
-      onSubmit={async () => {
-        return (
-          'Accounts are not connected yet — the authentication boundary is ' +
-          'built and tested but not yet wired into the API. Use the console ' +
-          'directly for now.'
-        );
+    <Landing
+      onStart={() => {
+        if (session.status === 'signed-in') {
+          setScreen('console');
+          return;
+        }
+        setMode('sign-up');
+        setScreen('auth');
+      }}
+      onPricing={() => setScreen('pricing')}
+      onSignIn={() => {
+        if (session.status === 'signed-in') {
+          setScreen('console');
+          return;
+        }
+        setMode('sign-in');
+        setScreen('auth');
       }}
     />
   );

@@ -205,6 +205,124 @@ hand out an enterprise entitlement.
 
 ---
 
+## Authentication, wired
+
+`SQLAGENT_REQUIRE_AUTH` decides the mode. Off by default: the CLI, the
+benchmark and a team running this against their own warehouse should not have
+to invent an account, and turning it on is a deliberate act. `/api/health`
+reports which mode is running so it is never a guess.
+
+### The dependency is the design
+
+`PrincipalDep` resolves a request to a tenant or raises 401. Every route that
+touches tenant data declares it — and the test that guarantees that **walks the
+app's own route table** rather than a hand-written list:
+
+```
+assert not missing, f"routes with no authentication: {sorted(set(missing))}"
+```
+
+A list maintained by hand would be missing exactly the route that was missing
+from the code. Proven to bite: removing the dependency from `/api/stats` fails
+the test naming that path.
+
+Public by design and by name: `/api/health` (a load balancer probes it before
+anyone signs in), `/api/plans` (a pricing page is read before there is an
+account), `/api/options` (static descriptions, no tenant data).
+
+### Single-tenant mode returns a real principal, not None
+
+`Principal(tenant_id="local")`. A None that downstream code has to check is a
+fallback waiting to be forgotten; a real principal means every scoping path —
+cache keys, history filters, usage counting — runs identically in both modes,
+which is the only way that code is ever exercised.
+
+### What is hashed with what, and why they differ
+
+| Value | Scheme | Why |
+|---|---|---|
+| API key secret | SHA-256 | 256 bits of our own randomness; nothing for a work factor to buy |
+| Session token | SHA-256 | same |
+| **Password** | **scrypt**, 32768/8/1 | chosen by a person, short, probably reused — the whole defence is making each guess expensive |
+| Tenant DSN | Fernet (encrypted) | it has to be used, so it cannot be hashed |
+
+Getting the first and third the same way round is a common and expensive
+mistake. Cost parameters are stored *in* each hash (`scrypt$n$r$p$salt$hash`),
+so raising them later does not lock anyone out — `needs_rehash` upgrades a
+password at sign-in, which is the only moment the plaintext exists to rehash
+with. A scheme that reads its parameters from a constant cannot raise them, so
+in practice it never does. Measured at **63ms** per hash.
+
+### Not leaking who has an account
+
+Sign-in returns one message for "no such user" and "wrong password", and
+`verify_user` runs a scrypt hash against a dummy value when the user is missing
+so the *timing* does not say what the message refuses to. Verified:
+
+```
+unknown address  -> {"detail":"Wrong email or password."}
+wrong password   -> {"detail":"Wrong email or password."}
+```
+
+Sign-**up** does say an address is taken, and that is unavoidable: a signup form
+that refuses to is unusable, and the same information is available from it
+anyway.
+
+### The cookie
+
+`httponly` — JavaScript cannot read it, so an XSS bug cannot exfiltrate the
+session. `samesite=lax`, not strict: strict drops the cookie on any cross-site
+navigation, so arriving from a link in an email would sign you out. `secure`
+follows `SQLAGENT_SECURE_COOKIES`, off locally only because a Secure cookie is
+silently dropped over plain HTTP and the resulting "sign-in does nothing" is
+genuinely hard to diagnose.
+
+Signing out deletes the row **and** clears the cookie, in that order. Clearing
+the cookie alone leaves the token valid for anyone who captured it.
+
+### One origin, which was not optional
+
+This bit immediately. Sign-up returned 200 and set the cookie; the very next
+`/api/auth/me` was 401. The page was on `127.0.0.1:5173` and the client pointed
+at `localhost:8000` — same machine, different hosts, therefore cross-site,
+therefore `SameSite=Lax` withheld the cookie. It looks exactly like a broken
+login and is nothing of the sort.
+
+Relaxing `SameSite` to `None` would have "fixed" it by turning the session into
+a cookie any site can cause to be sent, which is the trade CSRF exists because
+of. Instead the Vite dev server now proxies `/api` and the client defaults to a
+same-origin base, which removes the problem and matches production — where the
+frontend and the API sit behind one domain.
+
+### Quotas
+
+Enforced in one function called by both the JSON and the streaming ask
+handlers, because two handlers answering questions means two places a quota can
+be forgotten.
+
+Checked **before** a question and counted **after** it, and only when it
+succeeded — a question that failed on a model timeout must not consume an
+allowance, and a customer charged for an error writes a support ticket that
+costs more than the question did.
+
+A spent allowance is 402 with the numbers in it. A tier the plan does not
+include is *clamped*, not refused.
+
+### Verified end to end in a browser
+
+```
+1. landing                     shown to a signed-out visitor
+2. weak password               refused server-side: "Use at least 12 characters."
+3. sign-up                     console reached, cookie set
+4. account panel               Free plan · 2026-09 · 0/20 · 0/0 detailed · 0/1 databases
+5. asked one real question     Questions 1 / 20
+6. sign out                    back to landing
+7. reload                      still signed out
+   console errors              none
+```
+
+---
+
 ## Hosting shape
 
 ```

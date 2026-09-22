@@ -65,6 +65,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine
 from starlette.concurrency import run_in_threadpool
 
+from sqlagent.api.auth_routes import (
+    PrincipalDep,
+    enforce_and_clamp,
+    record_question,
+)
+from sqlagent.api.auth_routes import router as auth_router
 from sqlagent.clarify import CLARIFICATION_ERROR
 from sqlagent.config import OVERRIDABLE, Settings, settings
 from sqlagent.conversation import Turn, carryable_result
@@ -638,10 +644,20 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
+    # Credentials are allowed because the browser sends a session cookie. That
+    # is exactly why `allow_origins` above cannot become "*": the two together
+    # are forbidden by the spec, and a wildcard with credentials would let any
+    # site a signed-in user visits call this API as them.
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    # DELETE is needed for revoking keys, conversations and connections.
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
+
+# Sign-up, sign-in, sign-out, whoami and usage. Mounted after CORS so those
+# routes get the same headers as everything else — a login that works in curl
+# and fails in a browser is the most confusing possible version of this bug.
+app.include_router(auth_router)
 
 
 # --------------------------------------------------------------------------
@@ -662,7 +678,7 @@ def health(agent: AgentDep) -> HealthResponse:
 
 
 @app.get("/api/schema", response_model=SchemaResponse)
-def get_schema(agent: AgentDep) -> SchemaResponse:
+def get_schema(agent: AgentDep, principal: PrincipalDep) -> SchemaResponse:
     """The database structure, for the UI's schema browser."""
     snapshot = agent.snapshot
     tables = [
@@ -680,19 +696,34 @@ def get_schema(agent: AgentDep) -> SchemaResponse:
 
 
 @app.post("/api/ask", response_model=AskResponse)
-async def ask(request: AskRequest) -> AskResponse:
+async def ask(request: AskRequest, principal: PrincipalDep) -> AskResponse:
     """Answer a question and return everything at once."""
     agent = await run_in_threadpool(resolve_agent, request.dataset_id)
     conversation_id = await run_in_threadpool(
         _ensure_conversation, request.conversation_id, request.dataset_id
     )
     history = await run_in_threadpool(_load_history, conversation_id)
-    result = await run_in_threadpool(
-        agent.ask,
-        request.question,
-        history=history,
-        options=request.options.overrides() if request.options else None,
+
+    # Quota before any work, clamping included. Raises 402 when the allowance
+    # is spent; a tier the plan does not include is quietly reduced rather than
+    # refused, because turning one over-ambitious field into an outage is a bad
+    # trade for an upsell.
+    options = await run_in_threadpool(
+        enforce_and_clamp,
+        principal,
+        request.options.overrides() if request.options else None,
     )
+
+    result = await run_in_threadpool(
+        agent.ask, request.question, history=history, options=options
+    )
+
+    # Counted after, not before. A question that failed on a model timeout must
+    # not consume an allowance — a customer charged for an error writes a
+    # support ticket that costs more than the question did.
+    if result.ok:
+        await run_in_threadpool(record_question, principal, options)
+
     await run_in_threadpool(_record, result, request.dataset_id, conversation_id)
     return to_response(result, conversation_id)
 
@@ -839,6 +870,7 @@ def _record(
 
 @app.get("/api/ask/stream")
 async def ask_stream(
+    principal: PrincipalDep,
     question: Annotated[str, Query(min_length=1, max_length=2000)],
     dataset_id: Annotated[str | None, Query()] = None,
     conversation_id: Annotated[str | None, Query()] = None,
@@ -868,6 +900,13 @@ async def ask_stream(
             status_code=400, detail=f"invalid options: {exc}"
         ) from exc
 
+    # The same enforcement as /api/ask. Two handlers answering questions means
+    # two places a quota can be forgotten, so both call the one function and a
+    # test asserts neither passes raw options to the agent.
+    parsed_options = await run_in_threadpool(
+        enforce_and_clamp, principal, parsed_options
+    )
+
     agent = await run_in_threadpool(resolve_agent, dataset_id)
     thread_id = await run_in_threadpool(_ensure_conversation, conversation_id, dataset_id)
     history = await run_in_threadpool(_load_history, thread_id)
@@ -889,6 +928,8 @@ async def ask_stream(
                 options=parsed_options,
                 on_progress=on_progress,
             )
+            if result.ok:
+                await run_in_threadpool(record_question, principal, parsed_options)
             await run_in_threadpool(_record, result, dataset_id, thread_id)
             await queue.put(("result", to_response(result, thread_id).model_dump()))
         except Exception as exc:  # noqa: BLE001
@@ -931,6 +972,7 @@ async def ask_stream(
 
 @app.get("/api/schema/graph", response_model=GraphResponse)
 def schema_graph(
+    principal: PrincipalDep,
     dataset_id: Annotated[str | None, Query()] = None,
 ) -> GraphResponse:
     """The foreign-key graph, with positions, ready for the client to draw.
@@ -994,7 +1036,9 @@ def schema_graph(
 
 
 @app.post("/api/datasets", response_model=DatasetResponse)
-async def upload_dataset(file: Annotated[UploadFile, File()]) -> DatasetResponse:
+async def upload_dataset(
+    file: Annotated[UploadFile, File()], principal: PrincipalDep
+) -> DatasetResponse:
     """Upload a CSV, Excel workbook or PostgreSQL dump and make it queryable.
 
     The file is streamed to a temporary path first: reading a 500 MB upload
@@ -1025,7 +1069,7 @@ async def upload_dataset(file: Annotated[UploadFile, File()]) -> DatasetResponse
 
 
 @app.get("/api/datasets", response_model=list[DatasetResponse])
-def list_datasets() -> list[DatasetResponse]:
+def list_datasets(principal: PrincipalDep) -> list[DatasetResponse]:
     return [
         DatasetResponse(
             id=d["id"], name=d["name"], kind=d["kind"], tables=d["tables"],
@@ -1036,7 +1080,7 @@ def list_datasets() -> list[DatasetResponse]:
 
 
 @app.delete("/api/datasets/{dataset_id}")
-def delete_dataset(dataset_id: str) -> dict:
+def delete_dataset(dataset_id: str, principal: PrincipalDep) -> dict:
     if not get_store().delete_dataset(dataset_id):
         raise HTTPException(status_code=404, detail=f"No dataset '{dataset_id}'")
     get_dataset_agent.cache_clear()
@@ -1053,13 +1097,15 @@ def delete_dataset(dataset_id: str) -> dict:
 
 
 @app.get("/api/conversations", response_model=list[ConversationSummary])
-def list_conversations(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[dict]:
+def list_conversations(
+    principal: PrincipalDep, limit: Annotated[int, Query(ge=1, le=200)] = 50
+) -> list[dict]:
     """Threads, most recently used first."""
     return get_store().list_conversations(limit=limit)
 
 
 @app.post("/api/conversations", response_model=ConversationSummary)
-def create_conversation(request: NewConversationRequest) -> dict:
+def create_conversation(request: NewConversationRequest, principal: PrincipalDep) -> dict:
     """Start an empty thread.
 
     Rarely needed — asking a question with no ``conversation_id`` creates one
@@ -1074,7 +1120,7 @@ def create_conversation(request: NewConversationRequest) -> dict:
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=ConversationDetail)
-def get_conversation(conversation_id: str) -> ConversationDetail:
+def get_conversation(conversation_id: str, principal: PrincipalDep) -> ConversationDetail:
     """One thread and every turn in it, oldest first.
 
     This is what the UI calls to restore a thread after a reload, so the
@@ -1094,6 +1140,7 @@ def get_conversation(conversation_id: str) -> ConversationDetail:
 
 @app.get("/api/search", response_model=list[SearchHit])
 def search_turns(
+    principal: PrincipalDep,
     q: Annotated[str, Query(min_length=1, max_length=200)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[SearchHit]:
@@ -1153,7 +1200,7 @@ process ever sees — one, plus an entry per uploaded dataset.
 
 
 @app.get("/api/suggestions", response_model=SuggestionsResponse)
-def suggestions(agent: AgentDep) -> SuggestionsResponse:
+def suggestions(agent: AgentDep, principal: PrincipalDep) -> SuggestionsResponse:
     """Opening questions, proposed once per schema version.
 
     Keyed on the schema hash, which already changes on exactly the events that
@@ -1174,7 +1221,7 @@ def suggestions(agent: AgentDep) -> SuggestionsResponse:
 
 
 @app.get("/api/stats", response_model=StatsResponse)
-def stats() -> dict:
+def stats(principal: PrincipalDep) -> dict:
     """Aggregate numbers across every question ever asked."""
     return get_store().stats()
 
@@ -1236,6 +1283,7 @@ def plans() -> list[PlanResponse]:
 
 @app.get("/api/drift", response_model=DriftResponse)
 def drift(
+    principal: PrincipalDep,
     recent: Annotated[int, Query(ge=10, le=2000)] = 100,
     baseline: Annotated[int, Query(ge=10, le=5000)] = 300,
 ) -> DriftResponse:
@@ -1274,7 +1322,7 @@ def drift(
 
 
 @app.delete("/api/conversations/{conversation_id}")
-def delete_conversation(conversation_id: str) -> dict:
+def delete_conversation(conversation_id: str, principal: PrincipalDep) -> dict:
     if not get_store().delete_conversation(conversation_id):
         raise HTTPException(status_code=404, detail=f"No conversation '{conversation_id}'")
     return {"deleted": conversation_id}

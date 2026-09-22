@@ -2066,3 +2066,64 @@ td.is-null {
 .checkout .primary-button {
   width: 100%;
 }
+
+/* --------------------------------------------------------------------------
+   Account panel and boot state
+   -------------------------------------------------------------------------- */
+
+.boot {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
+
+.account {
+  max-width: 380px;
+}
+
+.meter {
+  margin-bottom: 16px;
+}
+
+.meter__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.meter__head span {
+  color: var(--muted-foreground);
+}
+
+.meter__head strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.meter__track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--secondary);
+  overflow: hidden;
+}
+
+.meter__fill {
+  height: 100%;
+  background: var(--primary);
+  transition: width 200ms var(--ease);
+}
+
+/* Spent reads as a warning, not an error: nothing is broken, and the next
+   question still works at a lower tier. */
+.meter__fill--spent {
+  background: var(--warning);
+}
+
+.account__foot {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
