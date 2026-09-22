@@ -179,18 +179,22 @@ def test_the_repeat_count_is_recorded(harness):
 # --------------------------------------------------------------------------
 
 
-def test_the_shipped_question_set_is_balanced(harness):
-    """A set that is mostly vague scores well by always asking, and a set that
-    is mostly clear scores well by never asking. Neither measures anything."""
-    items = json.loads((ROOT / "benchmarks" / "ambiguity_questions.json").read_text())
+def labelled(items):
+    return [item for item in items if not item.get("borderline")]
+
+
+def test_the_labelled_question_set_is_balanced(harness):
+    """A set that is mostly vague scores well by always asking, and one that is
+    mostly clear scores well by never asking. Neither measures anything."""
+    items = labelled(json.loads((ROOT / "benchmarks" / "ambiguity_questions.json").read_text()))
 
     vague = sum(1 for item in items if item["ambiguous"])
     assert len(items) >= 20
     assert 0.4 <= vague / len(items) <= 0.6
 
 
-def test_every_shipped_question_is_labelled(harness):
-    items = json.loads((ROOT / "benchmarks" / "ambiguity_questions.json").read_text())
+def test_every_non_borderline_question_is_labelled(harness):
+    items = labelled(json.loads((ROOT / "benchmarks" / "ambiguity_questions.json").read_text()))
 
     for item in items:
         assert isinstance(item.get("ambiguous"), bool), item
@@ -200,8 +204,43 @@ def test_every_shipped_question_is_labelled(harness):
 def test_every_vague_question_says_why_it_is_vague(harness):
     """A label with no reason is an assertion. The reason is what someone
     disagreeing with the score has to argue against."""
-    items = json.loads((ROOT / "benchmarks" / "ambiguity_questions.json").read_text())
+    items = labelled(json.loads((ROOT / "benchmarks" / "ambiguity_questions.json").read_text()))
 
     for item in items:
         if item["ambiguous"]:
             assert item.get("why"), item["question"]
+
+
+def test_borderline_questions_carry_no_label(harness):
+    """Deliberately unlabelled. A question a careful person could argue either
+    way has no ground truth to assert, and labelling it would be stating an
+    answer rather than measuring one. They contribute to stability, which needs
+    no labels and is the number that matters."""
+    items = json.loads((ROOT / "benchmarks" / "ambiguity_questions.json").read_text())
+    borderline = [item for item in items if item.get("borderline")]
+
+    assert borderline
+    for item in borderline:
+        assert "ambiguous" not in item, item["question"]
+
+
+def test_the_set_contains_questions_that_could_go_either_way(harness):
+    """Without them, 100% agreement means the check can tell obvious from
+    obvious. "How many orders were cancelled last month?" is where it might
+    actually break — "last month" is either a clear relative period or an
+    unbounded time word, and both readings are defensible."""
+    items = json.loads((ROOT / "benchmarks" / "ambiguity_questions.json").read_text())
+
+    assert sum(1 for item in items if item.get("borderline")) >= 10
+
+
+def test_borderline_questions_still_reach_the_runner(harness):
+    """`expected` is None for them, which the summary must treat as unlabelled
+    rather than as False — counted as "not ambiguous" they would silently
+    become a claim nobody made."""
+    result = harness.QuestionResult(question="q", expected=None, verdicts=[True, True])
+    report = harness.summarise([result])
+
+    assert report["questions"] == 1
+    assert report["labelled"] == 0
+    assert report["stability"] == 1.0

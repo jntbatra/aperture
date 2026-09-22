@@ -64,72 +64,57 @@ exists *and* a test covers it — a ticket is not closed by a plan.
 
 ---
 
+## Closed by measurement
+
+| # | Ticket | Result |
+|---|---|---|
+| 34 | Ambiguity check nondeterministic and unmeasured | **100% stable**, 42 questions x 5 repeats, 210 calls, verdict spread `{1: 42}` |
+| 39 | A query can answer a different question than asked | Detected by the judge (7 cases in 150, one verified by hand). Critic measured and **stays off**: net +0 accuracy, p = 1.000, 1.9x tokens |
+| 48 | `provide_token()` read the region from the environment, not the setting | Failed every question in a non-interactive shell; `mantle_region` now passed explicitly |
+| 49 | `llm_auth="sigv4"` unreachable whenever `llm_base_url` was set | Client dispatches on `resolved_llm_auth`; "local" decided from the hostname |
+| 50 | 16 API routes documented nowhere | Reference table in `06-operations.md`, checked against the code |
+| 51 | Stability set could only tell obvious from obvious | 12 unlabelled borderline questions added; still 100% stable |
+
+---
+
 ## Open
 
 | # | Ticket | State |
 |---|---|---|
-| 34 | Ambiguity check is nondeterministic | **instrument built, not run** |
-| 39 | A query can answer a different question than the one asked | **instrument built, not run** |
-| 42 | `ruff format --check` fails repo-wide | open |
+| 42 | `ruff format --check` fails repo-wide | open — needs a decision, not code |
+| 52 | The answer can invert the question the SQL answered | open — new, and the interesting one |
 
-### 34 — ambiguity stability
+### 52 — checking the sentence against the question
 
-`benchmarks/ambiguity.py` asks the same question *k* times and reports how
-often the clarifier agrees with itself, alongside a labelled 30-question set
-(15 vague, 15 clear) in `benchmarks/ambiguity_questions.json`. Stability is the
-number that matters: it needs no ground truth and cannot be argued with, unlike
-the accuracy figure beside it.
+Found by running the judge. Seven of 150 answers were **correct and badly
+written**: the SQL returned exactly the gold rows and the prose did not answer
+what was asked.
 
-30 questions x k=5 is 150 model calls and no database work.
+```
+Q:      ratio of OUTPATIENT to INPATIENT among SLE patients
+SQL:    matches gold exactly — scored CORRECT
+Answer: "The ratio of INPATIENT to OUTPATIENT ... is 1.3095"
+```
 
-**Not run** — benchmark runs are paused by request. The aggregation is tested
-(`tests/test_ambiguity_harness.py`, 17 tests); the model calls are not.
+Nothing in the pipeline can see this. Execution accuracy compares rows. The
+faithfulness guard compares figures, and `1.3095…` is genuinely in the rows.
+The critic reviews SQL, and this SQL deserved approving — measured above, it is
+the wrong lever.
 
-### 39 — answering a different question
+The fix belongs at the answer step: compare the sentence against the
+**question**, not against the rows. There are seven verified cases in
+`benchmarks/results/gemma4-31b-judged.json` to build against, which is the
+right way round — the test cases exist before the code.
 
-`judge.py` detects this offline, and `--judge` reports "correct but badly
-answered" — right rows, wrong write-up — which nothing else in the harness can
-surface. The open decision is whether the critic should default to on, and that
-needs a measured run with and without it.
-
-**Not run**, same reason.
-
-### What running the drift detector found
-
-Pointed at this project's own history on its first run, it reported the failure
-rate rising from **1.6% to 35%**. Thirty-one of those thirty-five "failures"
-were the agent asking a clarifying question — doing exactly what switching
-`ambiguity_handling` to `ask_human` configured it to do. The metric was
-measuring a settings change and calling it a regression.
-
-Two things were wrong, both now fixed (#43, #44): a clarification is stored
-with `ok = 0` because no answer was produced, and three separate places
-compared against the string `"needs_clarification"` by hand. The sidebar had
-the same bug and was reporting **78% answered** on a system where almost
-nothing had failed.
-
-Corrected, the same window reads:
-
-| | baseline (62) | recent (100) |
-|---|---|---|
-| failure_rate | 1.6% | 4.0% — not significant |
-| clarify_rate | 0.0% | **31.0%** (p < 0.0001) |
-| slow_rate | 9.7% | **37.0%** (p = 0.0001) |
-| costly_rate | 9.7% | **33.0%** (p = 0.0007) |
-
-All three shifts are explained: `ask_human` became the default, and the model
-changed to `gemma-4-31b` with a glossary in every prompt. That is the intended
-use — the detector says *something changed*, and a human says what.
+Costs a model call per question, so it would ship as a toggle, default off,
+and be measured the same way the critic just was.
 
 ### 42 — repo-wide formatting
 
 `make lint` runs `ruff check` (clean) and `ruff format --check`, which fails on
-40 files. This is pre-existing and includes files untouched in this pass; the
-code is hand-formatted and `ruff format` would reflow a lot of deliberately
-laid-out prose and comments. Fixing it means either accepting a large
-whitespace diff or dropping the format check. Not decided.
-
----
+40 files, pre-existing and mostly untouched. The code is hand-formatted and
+`ruff format` would reflow a lot of deliberately laid-out prose. Either accept
+a large whitespace diff or drop the format check. Not decided.
 
 ## Won't build, and why
 

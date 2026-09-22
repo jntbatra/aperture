@@ -900,6 +900,189 @@ nothing in the answer indicating the population had changed.
 
 ---
 
+## Measured on gemma-4-31b
+
+150 questions, BIRD mini-dev, seed 7, the same protocol as every earlier run in
+this document.
+
+| Metric | Value |
+|---|---|
+| Execution accuracy | **58.7%** (88/150) |
+| Correct first attempt | 58.7% |
+| Needed a repair | 0.7% |
+| Mean per question | 4.6s |
+| Tokens | 548k in / 19k out |
+| simple / moderate / challenging | 68.8% / 53.2% / 56.0% |
+
+Comparable to `qwen3-coder-480b` (57.6% on the same 150) and slower per
+question. The repair rate is the interesting number: **0.7%**, against 3.8% for
+qwen on the full set. Fewer queries fail outright, and the failures that remain
+are wrong answers rather than broken SQL — `wrong_result` is 61 of the 62
+failures, with a single unparseable statement.
+
+### Two bugs the run itself exposed
+
+Neither was in the agent. Both were settings that existed, were documented, and
+were silently ignored — which is the failure mode that survives a test suite.
+
+**The region was read from the environment, not from the setting.**
+`BedrockTokenAuth` called `provide_token()` with no arguments, so it fell back
+to `AWS_REGION` and raised without it. The API server, started from an
+interactive shell, worked fine. The benchmark, launched through
+`env PYTHONPATH= …`, failed all 150 questions in four seconds. `mantle_region`
+was already validated at startup; reading it from the environment as well was
+one source of truth too many.
+
+**`llm_auth="sigv4"` was unreachable.** `uses_local_llm` returned True for
+*any* explicit `llm_base_url`, and the client branched on it before looking at
+`llm_auth`. Setting both — which is exactly what pointing at Mantle's `/v1`
+route requires — took the local branch, attached no credential at all, and
+produced `401 Missing 'authorization' or 'x-api-key' header`. It now branches
+on `resolved_llm_auth`, and "local" is decided from the hostname rather than
+from whether a URL happens to be set.
+
+---
+
+## Answer quality, measured twice
+
+Mantle's `/openai/v1` bearer route serves exactly one model, so `--judge`
+inline meant **gemma grading gemma** — the self-review failure mode the judge's
+own design warns about, and the one case where a shared blind spot corrupts the
+measurement rather than the product.
+
+`benchmarks/rejudge.py` grades a finished run's stored answers with a different
+model on the other route. This is the whole payoff of storing the answer text
+with each outcome: judging is cheap, answering is not.
+
+| Judge | Quality | Ungraded |
+|---|---|---|
+| `gemma-4-31b` grading itself | 89.9% (134/149) | 1 |
+| `qwen3-coder-480b`, independent | **88.7%** (133/150) | 0 |
+
+1.2 points apart. The self-judging bias was small here — which is now a
+measured statement rather than a hope, and the reason to keep measuring it.
+
+### The defect execution accuracy cannot see
+
+Five answers were **correct and badly written**: the SQL returned exactly the
+gold rows, and the sentence did not answer the question. Verified by hand:
+
+```
+Q:      What is the ratio of OUTPATIENT to INPATIENT followed up treatment
+        among all the 'SLE' diagnosed patients?
+
+SQL:    SELECT CAST(COUNT(CASE WHEN Admission = '+' THEN 1 END) AS REAL)
+        / COUNT(CASE WHEN Admission = '-' THEN 1 END)
+        FROM Patient WHERE Diagnosis = 'SLE'
+        -- matches gold exactly; scored CORRECT
+
+Answer: "The ratio of INPATIENT to OUTPATIENT followed up treatment among
+        patients diagnosed with 'SLE' is 1.3095238095238095."
+```
+
+The figure is right. The sentence inverts the thing it names. Execution
+accuracy scored it correct, the faithfulness guard passed it — `1.3095…` is
+genuinely in the rows — and only the judge caught it.
+
+**This tells us the critic is the wrong lever for it.** The critic reviews SQL
+*before* it runs, and this SQL was correct. The defect is created at the
+answer-writing step, after every SQL-level check has already passed. Fixing it
+means checking the sentence against the *question*, not against the rows.
+
+---
+
+## Should the critic be on by default? No.
+
+The critic asks a second model whether the SQL answers the question, before it
+runs. It has been off by default since it was built, with a note saying its
+value was "exactly what the benchmark exists to measure". Measured, same 150
+questions, same seed, same model:
+
+| | accuracy | first try | repairs | tokens | per question |
+|---|---|---|---|---|---|
+| critic off | 58.7% (88/150) | 58.7% | 0.7% | 566k | 4.6s |
+| critic on | 58.7% (88/150) | 56.7% | 12.0% | **1,074k** | **7.5s** |
+
+Identical accuracy. **1.9x the tokens and 1.6x the latency for zero
+percentage points.**
+
+The per-question comparison is the part worth having, because two runs landing
+on the same total could hide a large amount of movement in both directions:
+
+```
+critic rescued  4
+critic broke    4
+net            +0     McNemar, 8 discordant pairs, p = 1.000
+```
+
+It is not that the critic does nothing — it rejected enough queries to push the
+repair rate from 0.7% to 12%. It is that its rewrites are right exactly as
+often as they are wrong. A reviewer drawn from the same model as the author
+does not add information; it adds variance, and variance is not accuracy.
+
+**It stays off**, and `quality_tier="thorough"` still turns it on for the case
+where someone has decided a slower, differently-wrong second opinion is worth
+having. That is now an informed choice rather than an implied upgrade.
+
+### And it is the wrong lever for the defect it was named after
+
+The ticket behind the critic was "a query can answer a different question than
+the one asked". The judge found seven of those in this run — and in every
+verified case **the SQL was correct**. The ratio example above returned exactly
+the gold rows; the sentence inverted them.
+
+The critic reviews SQL before execution. By the time that defect exists, the
+critic has already approved a query that deserved approving. Whatever fixes
+this has to compare the *answer* against the *question*, at the step after
+every SQL-level check has passed.
+
+---
+
+## How stable is the ambiguity check?
+
+`ask_human` is the default, so the decision to ask is made by a model call on
+every question — and a model call is not a function. An unstable *answer* is
+visible because the figures differ. An unstable *decision to ask* is invisible.
+
+42 questions x 5 repeats, 210 calls:
+
+| | |
+|---|---|
+| Stability | **100%** (42/42 agreed with themselves) |
+| Verdict spread | `{1: 42}` — every repeat agreed |
+| Agreement with labels | 100% over the 30 labelled |
+| Asks when vague / when clear | 100% / 0% |
+
+**What the perfect agreement score is worth: not much.** The 30 labelled
+questions are separated by design — "how are we doing lately?" against "how
+many rows are in `coupon_usages`?" — so 100% says the check can tell obvious
+from obvious. My labels, my questions.
+
+The 12 **borderline** questions are the informative ones, and they carry no
+label on purpose: a question a careful person could argue either way has no
+ground truth, and labelling it would be asserting an answer rather than
+measuring one. They contribute only to stability, which needs no labels.
+
+| Verdict | Question |
+|---|---|
+| asks | What is our revenue? |
+| asks | Show me orders over 500. |
+| asks | How much did we make on vegetarian items? |
+| asks | Which customers haven't ordered in a while? |
+| answers | How many orders were cancelled last month? |
+| answers | What percentage of orders used a coupon? |
+
+Nine of twelve ask. The splits are defensible: "orders over 500" is genuinely
+unclear on a database where the glossary declares money is stored in paise, and
+"cancelled last month" is not.
+
+**The honest caveat.** Temperature is 0, and 100% stability at k=5 may reflect
+deterministic serving as much as a robust prompt. It is the right number to
+watch over time — a drop is real evidence — but a single perfect reading is
+weaker than it looks.
+
+---
+
 ## Current state, honestly
 
 **Full BIRD mini-dev, all 500 questions, `qwen3-coder-480b`:**
