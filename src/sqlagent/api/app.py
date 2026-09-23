@@ -357,40 +357,17 @@ TOGGLE_DESCRIPTIONS: list[ToggleInfo] = [
         name="quality_tier",
         label="Care",
         help=(
-            "Fast answers most questions correctly in one go. Medium writes "
-            "the query three times and keeps the version that recurs, which "
-            "helps where the model is guessing. Detailed adds a second model "
-            "reviewing the query and splits a multi-part question into parts — "
-            "for a figure that will be acted on rather than glanced at."
+            "Fast: one attempt, mechanical checks only — correct for most "
+            "questions. Medium: writes the query three times and keeps the "
+            "version that recurs, which helps where the model is guessing. "
+            "Detailed: adds a second model reviewing the query, and splits a "
+            "multi-part question into parts answered separately. "
+            "This one control is all three decisions — there is nothing else "
+            "to switch on."
         ),
         cost="medium ~2x the tokens; detailed ~4x and several times slower",
         kind="choice",
         choices=["fast", "medium", "thorough"],
-    ),
-    ToggleInfo(
-        name="use_critic",
-        label="Review the query",
-        help=(
-            "A second model checks the SQL actually answers the question before "
-            "it runs. Catches queries that are safe, cheap and about the wrong "
-            "thing — the failure no mechanical check can see."
-        ),
-        cost="+1 model call",
-        kind="switch",
-    ),
-    ToggleInfo(
-        name="vote_samples",
-        label="Write it N times",
-        help=(
-            "Generate the query several times and keep the one that recurs. "
-            "Where the model is confident the samples agree and this changes "
-            "nothing; where it is guessing, the version that repeats is more "
-            "often right."
-        ),
-        cost="N model calls instead of 1",
-        kind="choice",
-        choices=["1", "3", "5"],
-        numeric=True,
     ),
     ToggleInfo(
         name="ambiguity_handling",
@@ -403,16 +380,6 @@ TOGGLE_DESCRIPTIONS: list[ToggleInfo] = [
         cost="+1 model call, and a question back to you",
         kind="choice",
         choices=["best_effort", "ask_human"],
-    ),
-    ToggleInfo(
-        name="decompose_questions",
-        label="Split multi-part questions",
-        help=(
-            "A question that is really several questions gets split, each part "
-            "answered separately, and the findings written up as one answer."
-        ),
-        cost="+1 call, then a full question per part",
-        kind="switch",
     ),
     ToggleInfo(
         name="prescreen_input",
@@ -483,6 +450,19 @@ TOGGLE_DESCRIPTIONS: list[ToggleInfo] = [
 
 The cost is not decoration. A toggle offered without one invites someone to
 switch everything on and conclude the tool is slow.
+
+Three settings are deliberately absent: ``use_critic``, ``vote_samples`` and
+``decompose_questions``. ``quality_tier`` already decides all three, and
+showing them alongside it did not merely duplicate the control — it
+**contradicted** it. With Care on *detailed*, the panel rendered "Review the
+query" as off, "Write it N times" as 1 and "Split multi-part questions" as off,
+while the engine was running all three. A control that displays the opposite of
+what is happening is worse than no control.
+
+They remain in :data:`sqlagent.config.OVERRIDABLE`, because isolating one of
+them is exactly what a benchmark run needs — that is how the critic was
+measured at net zero. What a person gets is the one decision they actually
+have: how hard to try.
 """
 
 

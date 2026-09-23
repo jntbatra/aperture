@@ -1206,7 +1206,7 @@ td.is-null {
   top: calc(100% + 8px);
   right: 0;
   z-index: 50;
-  width: 380px;
+  width: 420px;
   max-height: 72vh;
   overflow-y: auto;
   padding: 16px;
@@ -1234,26 +1234,39 @@ td.is-null {
   color: var(--ink-faint);
 }
 
+/* Two rows, not two columns.
+   The control used to sit beside the text, which squeezed the explanation into
+   roughly half the panel and wrapped a three-line sentence over nine. The
+   explanation is the part that makes the cost of a setting understandable, so
+   it gets the full width and the control sits next to the label it belongs
+   to. */
 .toggle {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 11px 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'label control'
+    'help  help'
+    'cost  cost';
+  align-items: center;
+  column-gap: 12px;
+  padding: 13px 0;
   border-bottom: 1px solid var(--line);
 }
 
 .toggle__text {
-  flex: 1;
-  min-width: 0;
+  display: contents;
 }
 
 .toggle__label {
-  font-size: 13px;
-  color: var(--ink);
+  grid-area: label;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--foreground);
 }
 
 .toggle__help {
-  margin-top: 3px;
+  grid-area: help;
+  margin-top: 5px;
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--ink-soft);
@@ -1262,6 +1275,7 @@ td.is-null {
 /* The cost, always visible rather than on hover. A toggle whose price is
    hidden gets switched on by everyone. */
 .toggle__cost {
+  grid-area: cost;
   margin-top: 4px;
   font-size: 11px;
   color: var(--ink-faint);
@@ -1269,8 +1283,8 @@ td.is-null {
 }
 
 .toggle__control {
-  flex-shrink: 0;
-  padding-top: 2px;
+  grid-area: control;
+  justify-self: end;
 }
 
 .toggles__foot {

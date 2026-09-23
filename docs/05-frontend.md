@@ -229,10 +229,33 @@ sent `"4"` where the schema wanted `4` and the user got a 422 they could not
 act on. `ToggleInfo.numeric` is now declared alongside the choices, and a test
 asserts it matches the request schema's own type.
 
+**One decision, one control.** `Care` (fast / medium / detailed) is the tier,
+and it decides three things: whether the query is written three times, whether
+a second model reviews it, and whether a multi-part question is split. Those
+three used to have their own switches next to it.
+
+That was not merely redundant, it was **wrong on screen**. With Care on
+*detailed*, the panel rendered "Review the query" as off, "Write it N times" as
+1 and "Split multi-part questions" as off — while the engine ran all three,
+because `critic_enabled()`, `vote_samples()` and `decompose_enabled()` all
+resolve the tier. A control displaying the opposite of what is happening is
+worse than no control.
+
+They are gone from the page and remain in `OVERRIDABLE`, because isolating one
+of them is exactly what a benchmark needs — it is how the critic was measured
+at net zero. `test_no_toggle_contradicts_the_tier` now walks every tier and
+fails if any shown control disagrees with what the engine would actually do.
+
 **Unset and off are different.** Clearing a toggle removes the key rather than
 sending `false`, so a user who resets goes back to following the server rather
 than being pinned to whatever the default happened to be the day they first
 opened the panel.
+
+Each row is two rows, not two columns: label and control on the first, the
+explanation full-width beneath. Beside the control the explanation had roughly
+half the panel and wrapped a three-sentence paragraph over nine lines — and the
+explanation is the part that makes a setting's cost understandable, which is
+the whole reason it is there.
 
 ### `Drift`
 

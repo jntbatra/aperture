@@ -596,7 +596,10 @@ def test_the_options_endpoint_describes_every_toggle(client):
 
     names = {toggle["name"] for toggle in body["toggles"]}
     assert "quality_tier" in names
-    assert "use_critic" in names
+    # `use_critic` was asserted here and has been removed from the page on
+    # purpose: `quality_tier` decides it, and showing both contradicted the
+    # engine. See `test_no_toggle_contradicts_the_tier`.
+    assert "use_critic" not in names
     assert set(body["defaults"]) >= names
 
 
@@ -682,15 +685,68 @@ def test_every_request_field_is_overridable():
     assert not extra, f"sendable but silently ignored: {sorted(extra)}"
 
 
+DERIVED = {
+    # Derived from the hop choice. Offering "start at 2, stop at 1" as a
+    # reachable state would be offering a setting with no meaning.
+    "max_hops",
+    # Decided by `quality_tier`. Shown alongside it, these did not duplicate
+    # the control, they contradicted it: with Care on *detailed* the panel
+    # rendered the critic off, voting at 1 and decomposition off while the
+    # engine ran all three. See `test_no_toggle_contradicts_the_tier`.
+    "use_critic",
+    "vote_samples",
+    "decompose_questions",
+}
+"""Settings that are overridable over the API but deliberately not on the page.
+
+Every entry needs a reason, and the reason is either "it has no independent
+meaning" or "something else already decides it".
+"""
+
+
+def test_no_toggle_contradicts_the_tier():
+    """No control may be shown whose value the tier overrides.
+
+    This is the general form of a real bug. `quality_tier="thorough"` forces
+    the critic, voting and decomposition on, and all three had their own
+    controls in the panel. Left at their defaults they rendered as *off* while
+    the engine ran them — a control displaying the opposite of what is
+    happening, which is worse than no control at all.
+    """
+    from sqlagent.api.app import TOGGLE_DESCRIPTIONS
+    from sqlagent.config import (
+        Settings,
+        critic_enabled,
+        decompose_enabled,
+        vote_samples,
+    )
+
+    shown = {toggle.name for toggle in TOGGLE_DESCRIPTIONS}
+    lying = []
+
+    for tier in ("fast", "medium", "thorough"):
+        config = Settings(_env_file=None, database_url="sqlite://", quality_tier=tier)
+        effective = {
+            "use_critic": critic_enabled(config),
+            "vote_samples": vote_samples(config),
+            "decompose_questions": decompose_enabled(config),
+        }
+        for name, running in effective.items():
+            if name in shown and getattr(config, name) != running:
+                lying.append(
+                    f"{name} shows {getattr(config, name)!r} "
+                    f"but runs {running!r} at tier={tier}"
+                )
+
+    assert not lying, "controls contradicting the tier: " + "; ".join(lying)
+
+
 def test_every_overridable_setting_is_described_to_the_user():
     from sqlagent.api.app import TOGGLE_DESCRIPTIONS
     from sqlagent.config import OVERRIDABLE
 
     described = {toggle.name for toggle in TOGGLE_DESCRIPTIONS}
-    # `max_hops` is deliberately not a separate control: it is derived from the
-    # hop choice, and offering "start at 2, stop at 1" as a reachable state
-    # would be offering a setting with no meaning.
-    missing = OVERRIDABLE - described - {"max_hops"}
+    missing = OVERRIDABLE - described - DERIVED
     assert not missing, f"overridable but never shown: {sorted(missing)}"
 
 
