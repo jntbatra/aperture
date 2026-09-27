@@ -265,6 +265,32 @@ def test_the_engine_knows_the_same_three_tiers():
         Settings(_env_file=None, database_url="sqlite://", quality_tier=tier)
 
 
+def test_the_benchmark_harness_knows_the_same_three_tiers():
+    """It did not. `--tier` was declared `["fast", "thorough"]` and stayed that
+    way when `medium` was added, so a sweep over all three skipped the middle
+    one and reported nothing but a usage message — which is only visible to
+    someone reading the log. A measurement you cannot take is worse than one
+    that comes out wrong, because nothing signals it."""
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    from sqlagent.saas.plans import TIER_ORDER
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("bird_cli", root / "benchmarks" / "bird.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["bird_cli"] = module
+    spec.loader.exec_module(module)
+
+    source = (root / "benchmarks" / "bird.py").read_text()
+    assert "choices=list(TIERS)" in source, (
+        "the harness should read the tiers from the engine, not restate them"
+    )
+    assert module.TIERS == TIER_ORDER
+
+
 def test_medium_and_thorough_both_vote():
     from sqlagent.config import Settings, vote_samples
 
