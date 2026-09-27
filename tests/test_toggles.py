@@ -1044,6 +1044,9 @@ def test_it_never_asks_when_the_deployment_says_not_to(database):
 
     assert result.ok
     assert result.trace.intent_asks == []
+    # …but it wanted to, and a run that cannot say so reports a setting as a
+    # finding about the model.
+    assert result.trace.intent_asks_withheld == ["customers or accounts?"]
 
 
 def test_established_facts_are_handed_over_rather_than_left_to_be_noticed(database):

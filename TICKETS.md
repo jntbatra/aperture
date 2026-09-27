@@ -169,7 +169,7 @@ Everything here is measured. See [docs/08-intent-design.md](docs/08-intent-desig
 | 72 | `--tier` never offered `medium`, so a sweep silently skipped it | **done** — harness reads the tiers from the engine, test binds them |
 | 73 | Gold annotations are 52.8% wrong; every number was against noise | **done** — `benchmarks/rescore.py`, no model calls; fast 72.3% -> 77.3% |
 | 74 | Is the model the bottleneck? | **done** — no. gemma-31b 61.3% beats qwen-480b 56.0% on the same pipeline |
-| 75 | `check_intent` — one call after execution, seeing question + SQL + rows | **in progress** — built, wired as Loop D behind `check_result_intent` (default off), 31 tests; the A/B has not been run |
+| 75 | `check_intent` — one call after execution, seeing question + SQL + rows | **A/B'd once** — 77.3% -> 81.5% corrected, rescued 5 broke 0, p = 0.062 at 1.97x tokens. A direction, not a finding; needs the full 500 |
 | 76 | An unmatched literal must produce a question, never a dropped filter | open — the Cravings Deals failure, and checkable rather than guessable |
 | 77 | Is BFS better than dumping the whole schema on a small database? | **run** — 1 hop 62.7%, whole schema 61.3%, 2 hops 60.0%; p = 0.688, needs the full 500 before the default moves |
 | 78 | Score the full 500 on corrected gold, repeated | open — 119 matched by text with a ±7pp interval ranks nothing |
@@ -203,18 +203,46 @@ can be said about every rewrite in turn.
 `tests/test_toggles.py` for the wiring through the real graph against a real
 database. 869 passing, ruff clean.
 
-**Not done, in order:**
-1. Delete the critic once this replaces it — measured net 0, then net −6.
-2. A/B against `fast` on corrected gold: **2 runs, ~900k tokens, ~5 min,
-   ~$0.14. ASK FIRST** (see CLAUDE.md). The harness flag exists:
-   `benchmarks/bird.py --intent`, and each outcome records
-   `intent_rejections` and `intent_asked` so the asks can be counted rather
-   than silently absorbed into the failures.
+**A/B'd, 2026-09-28** — `benchmarks/results/intent-on.json`, 150 questions,
+seed 7, gemma-4-31b, no glossary. Full numbers in `docs/08-intent-design.md`
+§6c.
+
+| | fast | fast + intent |
+|---|---|---|
+| corrected gold | 77.3% (92/119) | **81.5% (97/119)** |
+| paired, 118 | — | rescued 5, broke 0, **p = 0.062** |
+| where the check fired (17 questions) | — | rescued 4, broke 0 |
+| tokens | 454k | 894k (1.97x) |
+| cost | $0.068 | $0.131 |
+
+Three caveats that belong next to that table:
+
+* 43 of 149 questions produced different SQL with **no mismatch firing** —
+  temperature-0 nondeterminism. The whole-set comparison carries that as
+  noise; the 17-question fired subset is the attributable part.
+* p = 0.062 is a direction. #78 is the run that settles it.
+* The `ask` path was **never exercised** — the harness sets `best_effort`, so
+  `allow_ask` was False throughout. The zero in the results file is a setting.
+  `intent_ask_withheld` now records the suppressed question so the next run
+  can report it.
+
+It does beat what it replaces on the same measurement: the critic was rescued
+4 / broke 4 / net 0 at 1.9x, then net −6 inside `thorough`.
+
+**Not done:**
+1. Delete the critic — the evidence now points that way, but it is a product
+   change (it is what `thorough` is partly sold on) and #79 is the ticket that
+   reprices that tier. Decide them together.
+2. Turn `check_result_intent` on by default, and put it in `OVERRIDABLE` with
+   a control — only after #78, not on p = 0.062.
+3. Measure the `ask` path against something that can answer, which the BIRD
+   harness by construction cannot.
 
 **Reminder for whoever picks this up:** `ask` scores as a failure in the
 benchmark because a harness cannot answer it, so the measured number
 *understates* the real behaviour. Report it that way rather than disabling
-asking to flatter the score.
+asking to flatter the score. In the 2026-09-28 run it was disabled outright,
+which is why that run says nothing at all about it.
 
 ### 75 — the one change
 

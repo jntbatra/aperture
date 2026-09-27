@@ -789,6 +789,9 @@ def make_check_intent(agent: SqlAgent, config: Settings, emit):
                 "intent_repairs": state.get("intent_repairs", 0) + 1,
             }
 
+        if verdict.withheld_question:
+            trace.intent_asks_withheld.append(verdict.withheld_question)
+
         if verdict.verdict == "ask":
             logger.info("intent check is asking the user: %s", verdict.question)
             trace.intent_asks.append(verdict.render())

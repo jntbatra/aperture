@@ -183,11 +183,10 @@ when there is no evidence to be suspicious of.
 
 ## 5. The change
 
-**Status: built, wired, tested — not yet A/B'd, so nothing here is claimed to
-raise the score.** `src/sqlagent/guards/evidence.py`,
-`src/sqlagent/intent.py`, and Loop D in `src/sqlagent/agent_graph.py`, behind
-`check_result_intent` (default off). 31 tests; run it with
-`benchmarks/bird.py --intent`.
+**Status: built, wired, tested, A/B'd once — positive, and not significant.**
+`src/sqlagent/guards/evidence.py`, `src/sqlagent/intent.py`, and Loop D in
+`src/sqlagent/agent_graph.py`, behind `check_result_intent` (default off). 32
+tests; run it with `benchmarks/bird.py --intent`. The numbers are in §6c.
 
 One model call, **after** execution, that sees everything:
 
@@ -347,6 +346,67 @@ wall-clock and attention are — but a run is still the user's call to make, and
 Output is **3.4%** of tokens: this workload is input-dominated because the whole
 schema goes into every prompt. That is also why one-hop BFS came out *cheaper*
 than sending everything.
+
+## 6c. The first A/B — run 2026-09-28
+
+150 BIRD questions, seed 7, `google.gemma-4-31b`, no glossary, everything else
+identical. `benchmarks/results/intent-on.json` against `tier-fast.json`.
+Corrected gold is `arcwise_plat_sql_only_with_diff`, the same 119-question
+basis every other corrected number in this document uses.
+
+| | fast | fast + intent |
+|---|---|---|
+| accuracy, original gold | 61.3% (92/150) | **63.3% (95/150)** |
+| accuracy, corrected gold | 77.3% (92/119) | **81.5% (97/119)** |
+| tokens | 454k | 894k (1.97x) |
+| model calls per question | 2.02 | 3.15 |
+| wall clock | 94s | 165s |
+| cost | $0.068 | $0.131 |
+
+Paired on corrected gold, 118 questions: **rescued 5, broke 0, net +5,
+McNemar exact p = 0.062.**
+
+Zero broken is the part worth pausing on. The check can only lose a question
+by rejecting a right answer and getting a worse one back, and across 150
+questions it did that **no times** on corrected gold. The critic, on the same
+kind of comparison, broke four.
+
+### Why it is still not a finding
+
+**43 of 149 questions produced different SQL with no mismatch ever firing.**
+Generation is at temperature 0 and the prompts were identical, so those are
+run-to-run nondeterminism, not the change. A paired comparison over the whole
+set therefore carries variance of that size alongside the effect.
+
+The attributable subset is the 17 questions where the check actually fired —
+11% of them:
+
+| | rescued | broke | net | p |
+|---|---|---|---|---|
+| corrected gold, 11 of the 17 scorable | 4 | 0 | **+4** | 0.125 |
+| original gold, all 17 | 4 | 2 | **+2** | — |
+
+Honest claim: the check fires on about one question in nine, and where it
+fires it has so far only helped. p = 0.062 is a direction, not a result. The
+run that settles it is the full 500 (#78).
+
+### What it beats, on the same measurement
+
+The critic — the thing it replaces — measured **rescued 4, broke 4, net 0** at
+1.9x tokens, then net −6 inside `thorough`. This is net +5, broke 0, at 1.97x.
+Same cost, strictly more information: that was the argument before the run,
+and the run did not contradict it.
+
+### What the run could not measure
+
+The harness sets `ambiguity_handling="best_effort"`, so `allow_ask` is False
+and **no question was ever put to anyone**. The `ask` path — the outcome that
+is meant to be the point of this design — is entirely unmeasured here, and the
+zero in the results file is a setting, not a result. `intent_ask_withheld` now
+records what it would have asked, so the next run can report how many answers
+were given by guessing. This one cannot.
+
+---
 
 ## 7. What is honestly known about where we stand
 

@@ -164,6 +164,13 @@ class Trace:
     A rising count is not a regression. Each entry is a question that would
     otherwise have been answered by guessing at what was meant."""
 
+    intent_asks_withheld: list[str] = field(default_factory=list)
+    """Questions it would have asked, where the deployment forbids asking.
+
+    The benchmark harness forbids it, having nobody to answer. Without this
+    the run reports zero asks and that reads as a finding about the model,
+    when it is a setting."""
+
     cache_hit: bool = False
     """The SQL came from the cache; generation was skipped entirely."""
 

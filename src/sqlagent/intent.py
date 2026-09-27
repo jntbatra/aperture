@@ -129,6 +129,14 @@ class Verdict:
     question: str = ""
     options: tuple[str, ...] = ()
 
+    withheld_question: str = ""
+    """What it would have asked, when asking was switched off.
+
+    Recorded rather than only logged because the benchmark runs with asking
+    off, so without this the harness cannot report how many answers it gave by
+    guessing — and "0 asks" would read as a finding when it is a setting.
+    """
+
     @property
     def ok(self) -> bool:
         return self.verdict == "answers"
@@ -251,7 +259,7 @@ def check_intent(
             return Verdict("answers")
         if not allow_ask:
             logger.info("intent: would have asked %r; answering instead", asked)
-            return Verdict("answers")
+            return Verdict("answers", withheld_question=asked)
         options = tuple(
             str(o).strip()
             for o in (payload.get("options") or [])

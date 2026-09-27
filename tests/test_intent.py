@@ -338,3 +338,15 @@ def test_truncation_is_stated_rather_than_hidden():
 def test_a_verdict_is_immutable():
     with pytest.raises(AttributeError):
         Verdict("answers").verdict = "mismatch"  # type: ignore[misc]
+
+
+def test_a_withheld_ask_is_recorded_not_just_logged():
+    """The harness forbids asking, so a run reports zero asks. Without this,
+    "0 asks" reads as a finding about the model when it is a setting."""
+    verdict = _check(
+        StubClient('{"verdict": "ask", "question": "which sense of twice?"}'),
+        allow_ask=False,
+    )
+
+    assert verdict.ok
+    assert verdict.withheld_question == "which sense of twice?"

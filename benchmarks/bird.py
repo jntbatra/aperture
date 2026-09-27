@@ -81,6 +81,14 @@ class Outcome:
     intent_rejections: tuple[str, ...] = ()
     """Defects the intent check named after seeing the rows, in order."""
 
+    intent_ask_withheld: str = ""
+    """What it would have asked, had this harness been able to answer.
+
+    The run sets `best_effort`, so no question is ever put. Recording the
+    suppressed one is the difference between "the check never wanted to ask"
+    and "the check was not allowed to" — and only the first would be a finding
+    about the model."""
+
     intent_asked: str = ""
     """The question it put back to the user, when it asked one.
 
@@ -233,6 +241,11 @@ def evaluate_one(
             intent_asked=(
                 result.trace.intent_asks[0] if result.trace.intent_asks else ""
             ),
+            intent_ask_withheld=(
+                result.trace.intent_asks_withheld[0]
+                if result.trace.intent_asks_withheld
+                else ""
+            ),
             judged=verdict is not None,
             judge_ok=bool(verdict and verdict.ok),
             judge_defects=tuple(verdict.defects) if verdict else (),
@@ -369,6 +382,14 @@ def main() -> int:
         # convenience. With `ask_human` — now the default for real users — every
         # ambiguous question would stall and the score would be meaningless.
         "ambiguity_handling": "best_effort",
+        # Off unless --glossary names one. `.env` sets a glossary for the
+        # production database, and it was silently prepended to every BIRD prompt
+        # for a whole run: terms and metrics are global, not table-scoped, so
+        # notes about another schema are pure contamination. Removing it was
+        # worth 58.7% -> 61.3%, faster and cheaper. The harness now refuses to
+        # inherit it rather than relying on whoever runs it to clear the
+        # environment first.
+        "glossary_path": "",
     }
     if args.model:
         overrides["light_model"] = args.model
@@ -560,7 +581,9 @@ def report(
                     "config": {
                         name: getattr(config, name)
                         for name in (
-                            "quality_tier", "use_critic", "vote_samples",
+                            "quality_tier", "use_critic",
+                            "check_result_intent", "intent_repair_attempts",
+                            "vote_samples",
                             "vote_temperature", "decompose_questions",
                             "prescreen_input", "ambiguity_handling",
                             "glossary_path", "cache_sql",
