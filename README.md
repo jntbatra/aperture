@@ -153,6 +153,7 @@ top and work down.
 | 5 | [The web interface](docs/05-frontend.md) | React app, streaming, the design system |
 | 6 | [Running it](docs/06-operations.md) | Configuration, deployment, benchmarking, troubleshooting |
 | 7 | [Decisions and measurements](docs/07-decisions.md) | Every significant choice, what it cost, what it bought |
+| 8 | [Where the accuracy goes](docs/08-intent-design.md) | What `fast` really is, what the measurements rule out, and the one change the evidence points at |
 | — | [Aperture as a service](SAAS.md) | The five fronts, multi-tenancy, tiers, and what a hosted deployment needs |
 | — | [Tickets](TICKETS.md) | Every decision as a ticket with its real status: done, open, or won't-build with the reason |
 

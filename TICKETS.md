@@ -158,6 +158,39 @@ takes one — and a real migration tool.
 
 ---
 
+## Accuracy
+
+Everything here is measured. See [docs/08-intent-design.md](docs/08-intent-design.md).
+
+| # | Ticket | State |
+|---|---|---|
+| 70 | Benchmark the whole architecture, not just the base pipeline | **done** — fast 61.3%, medium 61.3%, thorough 57.3%; the ladder is worth nothing or less |
+| 71 | The production glossary was contaminating every BIRD prompt | **done** — removing it: 58.7% -> 61.3%, faster and cheaper |
+| 72 | `--tier` never offered `medium`, so a sweep silently skipped it | **done** — harness reads the tiers from the engine, test binds them |
+| 73 | Gold annotations are 52.8% wrong; every number was against noise | **done** — `benchmarks/rescore.py`, no model calls; fast 72.3% -> 77.3% |
+| 74 | Is the model the bottleneck? | **done** — no. gemma-31b 61.3% beats qwen-480b 56.0% on the same pipeline |
+| 75 | `check_intent` — one call after execution, seeing question + SQL + rows | **open — the change worth making** |
+| 76 | An unmatched literal must produce a question, never a dropped filter | open — the Cravings Deals failure, and checkable rather than guessable |
+| 77 | Is BFS better than dumping the whole schema on a small database? | open — `full_schema_threshold=0` vs `15`, one run, never tested |
+| 78 | Score the full 500 on corrected gold, repeated | open — 119 matched by text with a ±7pp interval ranks nothing |
+| 79 | Medium and thorough are sold and are worse than fast | open — the pricing charges for a negative |
+
+### 75 — the one change
+
+61 of 62 failures are a valid query that answered the wrong question, with
+every table already in the prompt and zero repairs fired. Every existing check
+compares question-to-SQL or rows-to-prose; **nothing compares the question to
+the rows**. One model call after execution, seeing all three, returning
+`answers` / `mismatch(reason)` / `ask(question, options)`. It replaces the
+critic rather than joining it — same cost, strictly more information.
+
+### 79 — the pricing is currently wrong
+
+Pro sells "50 detailed answers" and detailed measured **worse** than fast at
+4.4x the tokens. That must change before anyone pays.
+
+---
+
 ## Won't build, and why
 
 | # | Ticket | Why not |
