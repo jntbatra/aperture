@@ -408,6 +408,73 @@ were given by guessing. This one cannot.
 
 ---
 
+## 6d. The full 500 — run 2026-09-28
+
+All 500 mini-dev questions, `google.gemma-4-31b`, no glossary, `fast` against
+`fast + intent`. `full500-fast.json` and `full500-intent.json`. Corrected gold
+covers 419 of the 500; 416 paired and scorable.
+
+| | fast | fast + intent |
+|---|---|---|
+| accuracy, original gold | 63.0% (315/500) | 64.0% (320/500) |
+| accuracy, corrected gold | 70.9% (295/416) | **75.5% (314/416)** |
+| tokens | 1.50M | 2.96M (1.98x) |
+| calls per question | 2.00 | 3.17 |
+| wall clock | 494s | 3,760s |
+| cost | $0.224 | $0.434 |
+
+Paired, corrected gold: **rescued 24, broke 5, net +19, p = 0.0005.**
+
+The check fired on **78 of 500** questions (15.6%). Every repair in the run
+was one of its rejections — 79 questions needed a repair, against 1 in the
+baseline.
+
+### Split three ways, which is where it gets interesting
+
+| bucket | n | rescued | broke | net | p |
+|---|---|---|---|---|---|
+| the check fired | 52 | 13 | 3 | **+10** | 0.021 |
+| SQL differed, check never fired | 111 | 11 | 2 | **+9** | 0.023 |
+| SQL identical | 253 | 0 | 0 | 0 | 1.000 |
+
+The middle row is the problem. Those are questions where the check returned
+`answers` and changed nothing, and the two runs still produced different SQL —
+generation nondeterminism, 27% of the set. **That bucket should be
+zero-mean.** It is +9 at p = 0.023: the same size and the same direction as
+the effect being measured.
+
+So one of two things is true, and this run cannot tell them apart:
+
+1. the +19 headline is roughly half real and half a 2%-probability draw in the
+   noise, or
+2. the two runs are not exchangeable for some reason not yet found — the
+   intent run took 7.6x the wall clock, and whether load or throttling changes
+   what the model returns has never been checked here.
+
+**Either way the headline p = 0.0005 is not trustworthy, because a bucket in
+the same experiment where nothing happened scores nearly as well.**
+
+### What can be claimed
+
+On the 52 questions it fired on, the baseline scored **28.8%** — these are the
+hard ones, which is the right place for a check to be spending a model call —
+and the check took them to **48.1%**. Rescued 13, broke 3. That is the
+attributable measurement, and it is the one to quote.
+
+What is *not* claimed: the +19, the p = 0.0005, or any number that treats
+single-run variance on this harness as zero. The calibration run that would
+settle it is `fast` against `fast`, no change at all, same 500 — if the null
+bucket comes back at ±9 again, the noise floor is ±9 and the +10 sits inside
+it.
+
+### The ask path, still
+
+3 of 416 questions had a question suppressed by `allow_ask=False`. So it does
+want to ask, rarely — and that path remains unmeasured, because the harness
+is the wrong instrument for it.
+
+---
+
 ## 7. What is honestly known about where we stand
 
 On the corrected benchmark, `fast`, gemma-4-31b, 119 matched questions:

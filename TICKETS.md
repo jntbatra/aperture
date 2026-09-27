@@ -169,10 +169,10 @@ Everything here is measured. See [docs/08-intent-design.md](docs/08-intent-desig
 | 72 | `--tier` never offered `medium`, so a sweep silently skipped it | **done** — harness reads the tiers from the engine, test binds them |
 | 73 | Gold annotations are 52.8% wrong; every number was against noise | **done** — `benchmarks/rescore.py`, no model calls; fast 72.3% -> 77.3% |
 | 74 | Is the model the bottleneck? | **done** — no. gemma-31b 61.3% beats qwen-480b 56.0% on the same pipeline |
-| 75 | `check_intent` — one call after execution, seeing question + SQL + rows | **A/B'd once** — 77.3% -> 81.5% corrected, rescued 5 broke 0, p = 0.062 at 1.97x tokens. A direction, not a finding; needs the full 500 |
+| 75 | `check_intent` — one call after execution, seeing question + SQL + rows | **A/B'd on the full 500** — fires on 15.6% of questions; on those, 28.8% -> 48.1% (rescued 13, broke 3, p = 0.021). Headline +19 not trustworthy: a null bucket in the same run scored +9 |
 | 76 | An unmatched literal must produce a question, never a dropped filter | open — the Cravings Deals failure, and checkable rather than guessable |
 | 77 | Is BFS better than dumping the whole schema on a small database? | **run** — 1 hop 62.7%, whole schema 61.3%, 2 hops 60.0%; p = 0.688, needs the full 500 before the default moves |
-| 78 | Score the full 500 on corrected gold, repeated | open — 119 matched by text with a ±7pp interval ranks nothing |
+| 78 | Score the full 500 on corrected gold, repeated | **half done** — 416 paired on corrected gold, both arms. The *repeated* half is now the important half: a no-change `fast` vs `fast` run is needed to establish the noise floor, because a bucket where nothing happened scored +9 at p = 0.023 |
 | 79 | Medium and thorough are sold and are worse than fast | open — the pricing charges for a negative |
 
 ### 75 — exactly where it stands
@@ -229,7 +229,27 @@ Three caveats that belong next to that table:
 It does beat what it replaces on the same measurement: the critic was rescued
 4 / broke 4 / net 0 at 1.9x, then net −6 inside `thorough`.
 
+**Full 500, 2026-09-28** — `full500-fast.json` vs `full500-intent.json`,
+416 paired on corrected gold. Detail in `docs/08-intent-design.md` §6d.
+
+| bucket | n | rescued | broke | net | p |
+|---|---|---|---|---|---|
+| all paired | 416 | 24 | 5 | +19 | 0.0005 |
+| **the check fired** | **52** | **13** | **3** | **+10** | **0.021** |
+| SQL differed, no fire | 111 | 11 | 2 | +9 | 0.023 |
+| SQL identical | 253 | 0 | 0 | 0 | 1.000 |
+
+Quote the second row: on the 52 questions it fired on, the baseline scored
+28.8% and it scored 48.1%. Do **not** quote the +19 or the p = 0.0005 — the
+third row is a bucket where the check changed nothing, and it scores nearly
+as well, so single-run variance on this harness is not zero-mean. 2.96M
+tokens against 1.50M; $0.434 against $0.224.
+
 **Not done:**
+0. **The noise floor.** `fast` vs `fast`, no change, same 500 — one run,
+   ~1.5M tokens, ~8 min, ~$0.22. If the no-fire bucket comes back at ±9, the
+   +10 is inside the noise and nothing above is a finding. This now blocks
+   every other decision here.
 1. Delete the critic — the evidence now points that way, but it is a product
    change (it is what `thorough` is partly sold on) and #79 is the ticket that
    reprices that tier. Decide them together.
