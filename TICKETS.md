@@ -169,11 +169,39 @@ Everything here is measured. See [docs/08-intent-design.md](docs/08-intent-desig
 | 72 | `--tier` never offered `medium`, so a sweep silently skipped it | **done** — harness reads the tiers from the engine, test binds them |
 | 73 | Gold annotations are 52.8% wrong; every number was against noise | **done** — `benchmarks/rescore.py`, no model calls; fast 72.3% -> 77.3% |
 | 74 | Is the model the bottleneck? | **done** — no. gemma-31b 61.3% beats qwen-480b 56.0% on the same pipeline |
-| 75 | `check_intent` — one call after execution, seeing question + SQL + rows | **open — the change worth making** |
+| 75 | `check_intent` — one call after execution, seeing question + SQL + rows | **in progress** — `intent.py` + `guards/evidence.py` built and unit-verified; NOT wired into the graph, no tests, no A/B |
 | 76 | An unmatched literal must produce a question, never a dropped filter | open — the Cravings Deals failure, and checkable rather than guessable |
-| 77 | Is BFS better than dumping the whole schema on a small database? | open — `full_schema_threshold=0` vs `15`, one run, never tested |
+| 77 | Is BFS better than dumping the whole schema on a small database? | **run** — 1 hop 62.7%, whole schema 61.3%, 2 hops 60.0%; p = 0.688, needs the full 500 before the default moves |
 | 78 | Score the full 500 on corrected gold, repeated | open — 119 matched by text with a ±7pp interval ranks nothing |
 | 79 | Medium and thorough are sold and are worse than fast | open — the pricing charges for a negative |
+
+### 75 — exactly where it stands
+
+**Done:**
+* `src/sqlagent/guards/evidence.py` — deterministic facts: unmatched literals
+  (including the PostgreSQL enum case, where the driver raises rather than
+  returning no rows), filters that excluded nothing, distinctive phrases from
+  the question absent from the SQL. Verified against the three real failures
+  *and* against correct queries, which is how two false-positive bugs were
+  caught before they shipped.
+* `src/sqlagent/intent.py` — `check_intent()` returning
+  `answers` / `mismatch(reason)` / `ask(question, options)`, with
+  `allow_ask=False` for the harness since a benchmark has nobody to ask.
+
+**Not done, in order:**
+1. Wire it into `agent_graph` after `validate_and_execute`, behind
+   `check_result_intent` (new setting, default off). Free.
+2. Tests: the three real failures must be caught, the correct queries must stay
+   quiet, a failed check must return `answers` rather than withholding a good
+   result. Free.
+3. Delete the critic once this replaces it — measured net 0, then net −6.
+4. A/B against `fast` on corrected gold: **2 runs, ~900k tokens, ~5 min,
+   ~$0.14. ASK FIRST** (see CLAUDE.md).
+
+**Reminder for whoever picks this up:** `ask` scores as a failure in the
+benchmark because a harness cannot answer it, so the measured number
+*understates* the real behaviour. Report it that way rather than disabling
+asking to flatter the score.
 
 ### 75 — the one change
 
