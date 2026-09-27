@@ -86,11 +86,32 @@ Of 66 failures there, **one** was caused by retrieval missing a column. Perfect
 table selection — which multiple seed sets approximates — is worth less than a
 point.
 
-**Caveat, and it is a real one.** That is BFS versus *perfect tables* on 75
-tables. It is **not** BFS versus *dumping the whole schema* on a small one,
-which is what `fast` does on BIRD. That A/B has never been run, and it is one
-run: `full_schema_threshold=0` against `15`, same questions. Until it is run,
-"more context is always fine" is an assumption, not a finding.
+### …but dumping the whole schema is not free either — now measured
+
+The paragraph above compares BFS against *perfect tables*. It says nothing
+about BFS against *dumping everything*, which is what `fast` actually does on
+BIRD, where every database is under the 15-table threshold and retrieval is
+skipped on all 150 questions.
+
+That A/B has now been run. `full_schema_threshold=0` forces retrieval on;
+everything else identical.
+
+| | accuracy | vs whole schema | s/q | calls | tokens |
+|---|---|---|---|---|---|
+| whole schema (current `fast`) | 61.3% | — | 3.5 | 2.0 | 454k |
+| **BFS, 1 hop** | **62.7%** | rescued 4, broke 2, **net +2** | 5.0 | 3.0 | **421k** |
+| BFS, 2 hops | 60.0% | rescued 2, broke 4, net −2 | 4.8 | 3.0 | 456k |
+
+**p = 0.688** on four discordant questions. A direction, not a finding.
+
+Two things are worth keeping even at that significance. One hop scored higher
+on **fewer tokens** than sending everything, despite an extra model call —
+retrieval pays for itself on prompt size alone. And two hops scored *worse*
+than one, which is the first direct evidence in this repo that **more context
+can hurt**, rather than merely cost more.
+
+The honest status: promising, underpowered, and it needs the full 500 to
+become a finding. It is not a reason to change the default yet.
 
 ---
 
@@ -162,6 +183,9 @@ when there is no evidence to be suspicious of.
 
 ## 5. The change
 
+**Status: built and unit-verified, not yet wired into the graph and not yet
+A/B'd.** `src/sqlagent/guards/evidence.py` and `src/sqlagent/intent.py`.
+
 One model call, **after** execution, that sees everything:
 
 ```python
@@ -183,6 +207,34 @@ Three outcomes, not two:
 * **`answers`** — write the answer.
 * **`mismatch(reason)`** — regenerate with the reason in the repair prompt.
 * **`ask(question, options)`** — put it back to the user.
+
+### What the deterministic half already catches
+
+`guards/evidence.py` settles the checkable parts before any model sees them.
+Verified against the real failures and against correct queries:
+
+```
+category filter dropped entirely  →  "the question mentions 'Veg Spring Rolls',
+                                      'Dal Makhni' — appears nowhere in the SQL"
+status = 'DELIVRED'               →  "that value does not occur anywhere in
+                                      orders.status; the filter matches nothing"
+kitchenName = 'EatCrave'          →  same, on plain text
+correct COUNT query               →  silent
+correct listing query             →  silent
+```
+
+Two bugs were found by testing it against **correct** queries alongside broken
+ones, and both are the reason that matters:
+
+* *"the same rows with and without the WHERE"* is true of **every** un-grouped
+  aggregate by construction, so the check fired on a perfectly good
+  `SELECT count(*) … WHERE status = 'DELIVERED'`. That is precisely the false
+  alarm this module exists to avoid — it teaches the model to distrust correct
+  SQL — and it was only visible because a correct query was in the test set.
+* PostgreSQL **enums raise rather than returning no rows**:
+  `invalid input value for enum "OrderStatus": "DELIVRED"`. That error is
+  *stronger* evidence than an empty result, which could also mean the table is
+  empty, so it is now treated as a confirmed finding rather than a failed probe.
 
 ### Why after execution
 
@@ -232,12 +284,32 @@ The same discipline that killed the critic:
 
 Two other runs stand ahead of or beside it, both one run each:
 
-* **`full_schema_threshold=0` vs `15`** — does forcing seed selection and a
-  one-hop BFS beat dumping the whole schema on a small database? Untested.
+* ~~**`full_schema_threshold=0` vs `15`**~~ — **run**. One hop 62.7% against
+  61.3% for the whole schema, on fewer tokens; two hops 60.0%. p = 0.688, so
+  it needs the full 500 before the default changes.
 * **Corrected gold on the full 500**, not the 119 matched by question text, and
   repeated, so a number can be ranked rather than quoted.
 
 ---
+
+## 6b. What a run actually costs
+
+From the AWS Pricing API, `google.gemma-4-31b`, us-east-1, per 1K tokens:
+input $0.00014, output $0.00040 (standard); half that on flex/batch.
+
+| tier | per question | per 1,000 questions | a 150-question run |
+|---|---|---|---|
+| fast | $0.00045 | $0.45 | $0.068 |
+| medium | $0.00117 | $1.17 | $0.176 |
+| thorough | $0.00195 | $1.95 | $0.292 |
+
+Eight runs in one day came to **$0.86**. Inference is not the constraint here —
+wall-clock and attention are — but a run is still the user's call to make, and
+`CLAUDE.md` records that it must be asked for.
+
+Output is **3.4%** of tokens: this workload is input-dominated because the whole
+schema goes into every prompt. That is also why one-hop BFS came out *cheaper*
+than sending everything.
 
 ## 7. What is honestly known about where we stand
 

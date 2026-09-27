@@ -24,6 +24,13 @@ Some of that was wasted on my own errors — the first 150-question run used the
 wrong glossary and had to be redone, and the tier sweep silently skipped
 `medium` because `--tier` did not list it.
 
+**The reason is not the money.** Priced from the AWS Pricing API
+(`google.gemma-4-31b`, us-east-1, standard: $0.00014/1K in, $0.00040/1K out),
+all eight runs came to **$0.86** — a 150-question `fast` run is about **7
+cents**. The reasons to ask are that it is the user's decision, it burns
+several minutes of wall clock, and a run fired on a wrong assumption has to be
+fired again. Do not justify the rule with cost; justify it with those.
+
 ### What needs asking
 
 - any `benchmarks/bird.py` run, at any `--limit`
@@ -40,9 +47,10 @@ wrong glossary and had to be redone, and the tier sweep silently skipped
 
 ### How to ask
 
-Give the number before the question:
+Give the size and the time before the question, and say what it will settle:
 
-> "This is ~450k tokens and about 2 minutes. Run it?"
+> "~450k tokens, about 2 minutes, ~$0.07. It answers whether one-hop BFS beats
+> sending the whole schema. Run it?"
 
 For an A/B, price both halves. If a cheaper measurement answers the same
 question, say so and offer that instead — `rescore.py` exists precisely
