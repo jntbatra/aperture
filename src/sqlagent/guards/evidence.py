@@ -34,8 +34,8 @@ import re
 from dataclasses import dataclass, field
 
 import sqlglot
-from sqlglot import exp
 from sqlalchemy import text
+from sqlglot import exp
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ STOPWORDS = frozenset(
     our us we you your show list give tell find get all every each per total
     number count sum average avg min max top bottom first last more than less
     over under between order sort group having select
-    """.split()
+    """.split()  # noqa: SIM905 - a block of words reads as a block of words
 )
 """Words that carry no filtering intent.
 

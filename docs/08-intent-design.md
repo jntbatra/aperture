@@ -183,8 +183,11 @@ when there is no evidence to be suspicious of.
 
 ## 5. The change
 
-**Status: built and unit-verified, not yet wired into the graph and not yet
-A/B'd.** `src/sqlagent/guards/evidence.py` and `src/sqlagent/intent.py`.
+**Status: built, wired, tested — not yet A/B'd, so nothing here is claimed to
+raise the score.** `src/sqlagent/guards/evidence.py`,
+`src/sqlagent/intent.py`, and Loop D in `src/sqlagent/agent_graph.py`, behind
+`check_result_intent` (default off). 31 tests; run it with
+`benchmarks/bird.py --intent`.
 
 One model call, **after** execution, that sees everything:
 
@@ -207,6 +210,34 @@ Three outcomes, not two:
 * **`answers`** — write the answer.
 * **`mismatch(reason)`** — regenerate with the reason in the repair prompt.
 * **`ask(question, options)`** — put it back to the user.
+
+### How it sits in the graph
+
+```
+validate_and_execute ──success──► check_intent ──answers───► write_answer
+                                              ──mismatch──► build_context
+                                              ──ask───────► give_up (as a question)
+```
+
+Three bounds, each for a reason that was paid for once already:
+
+* **`intent_repair_attempts = 1`**, not the shared repair budget. A database
+  error either stops recurring or does not; "these rows do not answer the
+  question" is an opinion that can be held about every rewrite in turn. The
+  second attempt has a named defect the first did not — that is the part with
+  a mechanism behind it, and there is no third.
+* **A cached statement is never re-judged**, for the same reason the critic
+  skips one: it would undo the point of the cache.
+* **`ask` is refused when `ambiguity_handling` is `best_effort`.** A
+  deployment configured never to interrupt the user must hold here too, and
+  the harness sets exactly that.
+
+One cost worth naming rather than discovering later: a `mismatch` sends a
+*working* result back to be rewritten, and if the rewrite then fails to
+execute, the run gives up instead of falling back to the result it already
+had. That is the critic's existing shape. It is bounded to one rewrite, and if
+the A/B shows it losing questions that way, that is the number that decides
+whether the fallback gets built or the check gets deleted.
 
 ### What the deterministic half already catches
 
@@ -273,7 +304,7 @@ aimed at the wrong thing because it had nothing to look at.
 
 The same discipline that killed the critic:
 
-1. Ships as a toggle, **default off**.
+1. Ships as a toggle, **default off**. Done.
 2. A/B against `fast`, same 150 questions, same seed.
 3. Scored on **corrected** gold via `benchmarks/rescore.py`, because the
    original gold has a 52.8% annotation error rate and measuring against it is
@@ -281,6 +312,12 @@ The same discipline that killed the critic:
 4. Reported per-question — rescued, broke, net, McNemar — not as two totals.
 5. If it does not earn its model call, it is deleted, and this section is what
    says so.
+
+One thing to hold on to while reading that score: **an `ask` counts as a
+failure**, because a harness has nobody to ask. Each outcome records
+`intent_asked`, so the asks can be counted and subtracted in prose rather than
+quietly absorbed into the failure total — and the fix is to report it, not to
+switch asking off to flatter the number.
 
 Two other runs stand ahead of or beside it, both one run each:
 

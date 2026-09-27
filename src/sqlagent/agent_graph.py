@@ -26,7 +26,7 @@ awkward to read as nested control flow:
 As a graph, those stop being nested ``if`` statements inside a ``for`` loop and
 become what they actually are — two different edges out of one decision point:
 
-    validate_and_execute ──success──────────► write_answer
+    validate_and_execute ──success──────────► check_intent ──► write_answer
                          ──context failure──► widen_schema ──► build_context
                          ──sql failure──────► build_context
                          ──out of budget────► give_up
@@ -50,6 +50,7 @@ import logging
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from langgraph.graph import END, StateGraph
+from sqlalchemy import text
 
 from sqlagent.clarify import CLARIFICATION_ERROR, needs_clarification
 from sqlagent.config import Settings, critic_enabled, vote_samples
@@ -59,8 +60,11 @@ from sqlagent.guards.arithmetic import find_inflated_aggregates, one_to_many_map
 from sqlagent.guards.cost import CostRejected
 from sqlagent.guards.cost import check as check_cost
 from sqlagent.guards.critic import review as critic_review
+from sqlagent.guards.evidence import gather as gather_evidence
 from sqlagent.guards.prescreen import screen as prescreen_question
 from sqlagent.guards.validator import ValidationError, validate
+from sqlagent.intent import MAX_PREVIEW_CHARS, MAX_PREVIEW_ROWS
+from sqlagent.intent import check_intent as run_intent_check
 from sqlagent.llm.mantle import extract_sql
 
 # `Attempt` and `Trace` are imported at runtime rather than under
@@ -164,6 +168,15 @@ class AgentState(TypedDict, total=False):
     failed_sql: str | None
     failure_kind: str | None
     attempts: int
+
+    intent_repairs: int
+    """Rewrites driven by the intent check, counted apart from ``attempts``.
+
+    Its own budget because it is a different kind of failure. A database error
+    either stops recurring or does not; "these rows do not answer the
+    question" is an opinion that can be held about every rewrite in turn, so it
+    gets one go rather than a share of the general repair budget.
+    """
 
     # Output
     answer: str
@@ -645,6 +658,153 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
     return validate_and_execute
 
 
+def _evidence_for(
+    agent: SqlAgent, config: Settings, *, question: str, sql: str, row_count: int
+) -> str:
+    """What can be established about a finished query without asking a model.
+
+    Runs in its own read-only transaction with the same timeout as the query
+    itself, because the one that ran the query has already been closed.
+
+    Never raises. This is advisory input to a check that is itself advisory —
+    a probe that failed must not be able to fail the request that produced a
+    perfectly good result.
+    """
+    try:
+        with agent.engine.begin() as connection:
+            for statement in agent.dialect.session_setup(
+                statement_timeout_ms=config.statement_timeout_ms
+            ):
+                connection.execute(text(statement))
+            found = gather_evidence(
+                connection,
+                question=question,
+                sql=sql,
+                dialect=agent.dialect.sqlglot_name,
+                row_count=row_count,
+            )
+    except Exception as exc:  # noqa: BLE001 - advisory, never fatal
+        logger.debug("evidence probes failed: %s", exc)
+        return ""
+
+    if not found.worth_mentioning(row_count):
+        return ""
+    return found.render(row_count)
+
+
+def make_check_intent(agent: SqlAgent, config: Settings, emit):
+    """Loop D: do the rows that came back answer the question that was asked?
+
+    The gap this closes was measured, not guessed. Over 150 BIRD questions, 61
+    of the 62 failures were a valid query returning the wrong rows — nothing
+    raised, nothing to repair against. No earlier check can see that, because
+    of what each one is handed: ``clarify`` and the critic get the question and
+    the SQL and never a row, the faithfulness check gets the rows and never the
+    question. This is the only place that holds all three at once.
+
+    Three outcomes rather than two. ``mismatch`` is the critic's behaviour with
+    rows in front of it, and routes back through the ordinary repair loop with
+    the named defect attached. ``ask`` stops and puts a question to the user,
+    which is the outcome a benchmark cannot reward — a harness has nobody to
+    ask, so every ``ask`` scores as a failure and the measured number
+    understates the behaviour. Guessing silently is what produced those 61.
+
+    The one cost worth naming: a mismatch sends a *working* result back to be
+    rewritten, and if the rewrite then fails to execute the run gives up rather
+    than falling back to the result it already had. That is the critic's
+    existing shape, and it is bounded here by ``intent_repair_attempts``.
+    """
+
+    def check_intent(state: AgentState) -> dict[str, Any]:
+        trace = state["trace"]
+
+        # Same reason as the critic: a bare {} would leave `failure_kind` set
+        # from the previous pass and route an accepted result back to be
+        # rewritten forever.
+        PASS: dict[str, Any] = {"failure_kind": None}
+
+        if not config.check_result_intent:
+            return PASS
+
+        result = state.get("result")
+        if result is None:
+            return PASS
+
+        # A cached statement ran successfully before and was judged then.
+        # Re-judging it on every hit would undo the point of caching.
+        if state.get("from_cache"):
+            return PASS
+
+        if state.get("intent_repairs", 0) >= config.intent_repair_attempts:
+            return PASS
+
+        # The general budget is shared with both repair loops. A query already
+        # rewritten three times is not saved by a fourth opinion.
+        if state.get("attempts", 0) >= config.max_repair_attempts:
+            return PASS
+
+        emit("validating", {"message": "Checking the rows answer the question"})
+
+        sql = state["validated_sql"]
+        verdict = run_intent_check(
+            agent.client,
+            question=state["question"],
+            sql=sql,
+            schema_text=state.get("schema_text", ""),
+            result_preview=result.preview(limit=MAX_PREVIEW_ROWS)[:MAX_PREVIEW_CHARS],
+            row_count=result.row_count,
+            model=config.intent_model or config.strong_model,
+            conversation=render_conversation(
+                state.get("history", []),
+                window=config.conversation_window,
+                summary=state.get("history_summary", ""),
+            ),
+            truncated=result.truncated,
+            evidence=_evidence_for(
+                agent,
+                config,
+                question=state["question"],
+                sql=sql,
+                row_count=result.row_count,
+            ),
+            # A deployment configured never to interrupt the user must not be
+            # interrupted from here either. The benchmark harness sets
+            # `best_effort` for exactly this reason: it has nobody to ask.
+            allow_ask=config.ambiguity_handling == "ask_human",
+            trace=trace,
+        )
+
+        if verdict.verdict == "mismatch":
+            logger.info("intent check rejected the result: %s", verdict.reason)
+            trace.intent_rejections.append(verdict.reason)
+            trace.attempts.append(Attempt(sql, False, verdict.reason, "intent_mismatch"))
+            return {
+                "last_error": (
+                    f"The query ran, but the rows did not answer the question: "
+                    f"{verdict.reason}"
+                ),
+                "failed_sql": sql,
+                "failure_kind": "intent_mismatch",
+                "attempts": state.get("attempts", 0) + 1,
+                "intent_repairs": state.get("intent_repairs", 0) + 1,
+            }
+
+        if verdict.verdict == "ask":
+            logger.info("intent check is asking the user: %s", verdict.question)
+            trace.intent_asks.append(verdict.render())
+            return {
+                "clarification": verdict.render(),
+                "clarification_asks": [
+                    {"question": verdict.question, "options": list(verdict.options)}
+                ],
+                "failure_kind": None,
+            }
+
+        return PASS
+
+    return check_intent
+
+
 def make_widen_schema(agent: SqlAgent, config: Settings, emit):
     """Loop B: offer the model more of the schema, then try again."""
 
@@ -787,7 +947,7 @@ def make_route_after_execute(config: Settings):
 
     def route_after_execute(state: AgentState) -> str:
         if state.get("last_error") is None:
-            return "write_answer"
+            return "check_intent"
 
         # A cached statement failed. It was validated with no allow-list and no
         # retrieval behind it, so there is no context to repair *from* — start
@@ -808,6 +968,29 @@ def make_route_after_execute(config: Settings):
     return route_after_execute
 
 
+def make_route_after_intent(config: Settings):
+    """Accept, rewrite, or hand a question back."""
+
+    def route_after_intent(state: AgentState) -> str:
+        # An `ask` is a deliberate outcome, not a failure to produce a query,
+        # and `give_up` renders it as the question it is.
+        if state.get("clarification"):
+            return "give_up"
+
+        if state.get("failure_kind") != "intent_mismatch":
+            return "write_answer"
+
+        # Out of budget with a result already in hand. Answering with a result
+        # something objected to beats answering with nothing: the objection is
+        # an opinion, the rows are real.
+        if state.get("attempts", 0) > config.max_repair_attempts:
+            return "write_answer"
+
+        return "build_context"
+
+    return route_after_intent
+
+
 def build_agent_graph(agent: SqlAgent, config: Settings, emit):
     """Assemble and compile the graph.
 
@@ -823,6 +1006,7 @@ def build_agent_graph(agent: SqlAgent, config: Settings, emit):
     builder.add_node("generate_sql", make_generate_sql(agent, config, emit))
     builder.add_node("criticise", make_criticise(agent, config, emit))
     builder.add_node("validate_and_execute", make_validate_and_execute(agent, config, emit))
+    builder.add_node("check_intent", make_check_intent(agent, config, emit))
     builder.add_node("widen_schema", make_widen_schema(agent, config, emit))
     builder.add_node("write_answer", make_write_answer(agent, config, emit))
     builder.add_node("give_up", make_give_up(agent, config, emit))
@@ -862,10 +1046,22 @@ def build_agent_graph(agent: SqlAgent, config: Settings, emit):
         "validate_and_execute",
         make_route_after_execute(config),
         {
-            "write_answer": "write_answer",
+            "check_intent": "check_intent",
             "widen_schema": "widen_schema",
             "build_context": "build_context",   # Loop A
             "select_tables": "select_tables",    # a cached statement failed
+            "give_up": "give_up",
+        },
+    )
+    # Loop D sits between a successful execution and the answer when enabled,
+    # and is a pass-through when it is not — one graph shape either way, for
+    # the same reason as Loop C.
+    builder.add_conditional_edges(
+        "check_intent",
+        make_route_after_intent(config),
+        {
+            "write_answer": "write_answer",
+            "build_context": "build_context",
             "give_up": "give_up",
         },
     )

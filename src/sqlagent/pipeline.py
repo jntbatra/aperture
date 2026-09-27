@@ -151,6 +151,19 @@ class Trace:
     critic_rejections: list[str] = field(default_factory=list)
     """Defects the critic named, in order. Each one triggered a regeneration."""
 
+    intent_rejections: list[str] = field(default_factory=list)
+    """Defects the intent check named after seeing the rows, in order.
+
+    Counted separately from the critic's: the two look at the same question
+    with different evidence, and an A/B between them is only readable if the
+    trace says which one spoke."""
+
+    intent_asks: list[str] = field(default_factory=list)
+    """Questions the intent check put back to the user instead of answering.
+
+    A rising count is not a regression. Each entry is a question that would
+    otherwise have been answered by guessing at what was meant."""
+
     cache_hit: bool = False
     """The SQL came from the cache; generation was skipped entirely."""
 

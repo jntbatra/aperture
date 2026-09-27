@@ -78,6 +78,16 @@ class Outcome:
     """The prose written from the rows. Recorded so a run can be re-judged
     later without re-running it — judging is cheap, answering is not."""
 
+    intent_rejections: tuple[str, ...] = ()
+    """Defects the intent check named after seeing the rows, in order."""
+
+    intent_asked: str = ""
+    """The question it put back to the user, when it asked one.
+
+    Recorded because an ``ask`` scores as a *failure* here — a harness has
+    nobody to ask — so the accuracy number understates the behaviour by
+    exactly these. Read them before reading the score."""
+
     judged: bool = False
     judge_ok: bool = False
     judge_defects: tuple[str, ...] = ()
@@ -219,6 +229,10 @@ def evaluate_one(
             output_tokens=result.trace.output_tokens,
             seconds=result.trace.seconds,
             answer=result.answer,
+            intent_rejections=tuple(result.trace.intent_rejections),
+            intent_asked=(
+                result.trace.intent_asks[0] if result.trace.intent_asks else ""
+            ),
             judged=verdict is not None,
             judge_ok=bool(verdict and verdict.ok),
             judge_defects=tuple(verdict.defects) if verdict else (),
@@ -279,6 +293,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--critic", action="store_true", help="Loop C: review the SQL before running it"
+    )
+    parser.add_argument(
+        "--intent", action="store_true",
+        help="Loop D: after the query runs, ask whether the ROWS answer the "
+             "question. Note that an `ask` cannot be answered by a harness and "
+             "scores as a failure, so this number understates the behaviour",
     )
     parser.add_argument(
         "--vote", type=int, default=None, metavar="N",
@@ -361,6 +381,8 @@ def main() -> int:
         overrides["quality_tier"] = args.tier
     if args.critic:
         overrides["use_critic"] = True
+    if args.intent:
+        overrides["check_result_intent"] = True
     if args.vote:
         overrides["vote_samples"] = args.vote
     if args.vote_temperature is not None:
@@ -390,6 +412,7 @@ def main() -> int:
         for name, on in (
             (f"tier={config.quality_tier}", config.quality_tier != "fast"),
             ("critic", config.use_critic),
+            ("intent", config.check_result_intent),
             (f"vote={config.vote_samples}@{config.vote_temperature}", config.vote_samples > 1),
             ("decompose", config.decompose_questions),
             ("prescreen", config.prescreen_input),

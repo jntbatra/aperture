@@ -286,6 +286,46 @@ class Settings(BaseSettings):
     models is the cheapest partial defence.
     """
 
+    check_result_intent: bool = False
+    """After the query runs, ask a model whether the *rows* answer the question.
+
+    Measured over 150 BIRD questions, 61 of 62 failures were a valid query that
+    returned the wrong rows — no error, nothing to repair against. Every
+    existing check is blind to that, because of what each one is given:
+    ``clarify`` and the critic see the question and the SQL but never a row,
+    and the faithfulness check sees the rows but never the question.
+
+    This runs after execution with all three, plus whatever
+    :mod:`sqlagent.guards.evidence` could establish against the database. It
+    can accept, send the query back with a named defect, or stop and ask the
+    user.
+
+    Off by default and deliberately not in ``OVERRIDABLE``: it adds a model
+    call to every successful question, and whether it earns that call is
+    exactly what the A/B exists to settle. If it does, it replaces the critic
+    rather than joining it — same cost, strictly more information.
+    """
+
+    intent_model: str = ""
+    """Model for the intent check. Empty means use ``strong_model``.
+
+    Separate from ``critic_model`` for the same reason that one is separate
+    from the answering model, and separate from ``judge_model`` for a stronger
+    one: the judge produces the *measurement*, so sharing a model with the
+    thing being measured would let one blind spot score itself.
+    """
+
+    intent_repair_attempts: int = 1
+    """How many times a ``mismatch`` may send a query back to be rewritten.
+
+    One, not ``max_repair_attempts``. A repair loop driven by a model's opinion
+    of the rows has no ground truth to converge on — a database error either
+    stops recurring or does not, whereas "this does not answer the question"
+    can be said about every rewrite forever. One rewrite is the part with a
+    mechanism behind it: the second attempt has a named defect the first did
+    not.
+    """
+
     vote_samples: int = 1
     """Generate the SQL this many times and keep the statement that recurs.
 

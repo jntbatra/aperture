@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import create_engine, text
 
+from sqlagent.clarify import CLARIFICATION_ERROR
 from sqlagent.config import Settings, critic_enabled, vote_samples
 from sqlagent.llm.mantle import Completion
 from sqlagent.pipeline import SqlAgent
@@ -881,3 +882,182 @@ def test_the_cap_reaches_the_prompt_not_just_the_truncation(database):
     agent.ask("who are our best customers?")
 
     assert any(system and "5." in system for system in client.systems)
+
+
+# --------------------------------------------------------------------------
+# The intent check (Loop D)
+#
+# The only check that holds the question, the SQL and the rows at once, which
+# is where 61 of 62 measured failures live. These drive it through the real
+# graph against the real SQLite database — the wiring, not the module.
+# --------------------------------------------------------------------------
+
+
+def test_the_intent_check_can_reject_a_result_and_force_a_rewrite(database):
+    """Loop D end to end. The query ran, returned rows, and answered the
+    wrong question — no error, nothing an earlier check could have caught."""
+    client = ScriptedClient(
+        "SELECT count(*) FROM orders",                          # first attempt
+        '{"verdict": "mismatch", "reason": "it counts orders, but the '
+        'question asks how many customers"}',                   # rows seen, rejected
+        "SELECT count(*) FROM customers",                       # rewrite
+        "There are 2 customers.",                               # answer
+    )
+    agent = build(database, client, check_result_intent=True)
+
+    result = agent.ask("How many customers are there?")
+
+    assert result.ok
+    assert "customers" in result.sql and "orders" not in result.sql
+    assert result.trace.intent_rejections == [
+        "it counts orders, but the question asks how many customers"
+    ]
+
+
+def test_the_intent_check_sees_the_rows_not_just_the_sql(database):
+    """The critic's whole defect. It reads code and guesses; on the worst
+    failure seen on real data it approved the query, and what gave it away was
+    the result."""
+    client = ScriptedClient(
+        "SELECT count(*) FROM customers", '{"verdict": "answers"}', "There are 2."
+    )
+    agent = build(database, client, check_result_intent=True)
+
+    agent.ask("How many customers?")
+
+    judged = client.prompts[1]
+    assert "How many customers?" in judged
+    assert "count" in judged.lower()
+    assert "2" in judged
+
+
+def test_the_named_defect_reaches_the_repair_prompt(database):
+    client = ScriptedClient(
+        "SELECT count(*) FROM orders",
+        '{"verdict": "mismatch", "reason": "wrong table entirely"}',
+        "SELECT count(*) FROM customers",
+        "There are 2 customers.",
+    )
+    agent = build(database, client, check_result_intent=True)
+
+    agent.ask("How many customers?")
+
+    assert any("wrong table entirely" in prompt for prompt in client.prompts)
+
+
+def test_an_accepted_result_does_not_loop(database):
+    """`failure_kind` left set from the previous pass would route an accepted
+    result back to be rewritten, forever. The critic shipped that bug once."""
+    client = ScriptedClient(
+        "SELECT count(*) FROM customers", '{"verdict": "answers"}', "There are 2."
+    )
+    agent = build(database, client, check_result_intent=True)
+
+    result = agent.ask("How many customers?")
+
+    assert result.ok
+    assert result.trace.repair_count == 0
+
+
+def test_only_one_rewrite_is_driven_by_intent(database):
+    """A database error either stops recurring or does not. "These rows do not
+    answer the question" can be said about every rewrite in turn, so it gets
+    one go rather than a share of the general repair budget."""
+    client = ScriptedClient(
+        "SELECT count(*) FROM orders",
+        '{"verdict": "mismatch", "reason": "wrong table"}',
+        "SELECT count(*) FROM customers",
+        "There are 2 customers.",
+    )
+    agent = build(database, client, check_result_intent=True)
+
+    result = agent.ask("How many customers?")
+
+    assert result.ok
+    # Four calls: generate, judge, regenerate, answer. The second result is
+    # not judged again, so nothing consumed a fifth reply.
+    assert client.calls == 4
+    assert len(result.trace.intent_rejections) == 1
+
+
+def test_a_failed_intent_check_still_returns_the_answer(database):
+    """The last thing between a working result and the user. A check that
+    cannot parse its own reply must not withhold a correct answer."""
+    client = ScriptedClient(
+        "SELECT count(*) FROM customers",
+        "looks fine to me",            # not JSON, not a verdict
+        "There are 2 customers.",
+    )
+    agent = build(database, client, check_result_intent=True)
+
+    result = agent.ask("How many customers?")
+
+    assert result.ok
+    assert result.answer == "There are 2 customers."
+
+
+def test_the_intent_check_is_not_called_when_it_is_off(database):
+    client = ScriptedClient("SELECT count(*) FROM customers", "There are 2 customers.")
+    agent = build(database, client, check_result_intent=False)
+
+    agent.ask("How many customers?")
+
+    assert client.calls == 2  # generate, answer — nothing judged
+
+
+def test_the_intent_check_can_hand_the_question_back(database):
+    """The outcome a benchmark cannot reward — a harness has nobody to ask, so
+    every ask scores as a failure. Guessing silently is what produced the
+    failures this check exists for."""
+    client = ScriptedClient(
+        '{"ambiguous": false}',                                  # pre-screen
+        "SELECT count(*) FROM customers",
+        '{"verdict": "ask", "question": "customers or accounts?", '
+        '"options": ["customers", "accounts"]}',
+    )
+    agent = build(
+        database, client, check_result_intent=True, ambiguity_handling="ask_human"
+    )
+
+    result = agent.ask("How many customers?")
+
+    assert result.error == CLARIFICATION_ERROR
+    assert "customers or accounts?" in result.answer
+    assert result.clarification_asks == [
+        {"question": "customers or accounts?", "options": ["customers", "accounts"]}
+    ]
+
+
+def test_it_never_asks_when_the_deployment_says_not_to(database):
+    """`best_effort` means never interrupt the user. A check that asks anyway
+    is a setting that does not hold."""
+    client = ScriptedClient(
+        "SELECT count(*) FROM customers",
+        '{"verdict": "ask", "question": "customers or accounts?"}',
+        "There are 2 customers.",
+    )
+    agent = build(
+        database, client, check_result_intent=True, ambiguity_handling="best_effort"
+    )
+
+    result = agent.ask("How many customers?")
+
+    assert result.ok
+    assert result.trace.intent_asks == []
+
+
+def test_established_facts_are_handed_over_rather_than_left_to_be_noticed(database):
+    """The evidence probes run against the real database and their findings go
+    into the prompt as settled, before the rows."""
+    client = ScriptedClient(
+        "SELECT id FROM orders WHERE total > 0",
+        '{"verdict": "answers"}',
+        "Both orders.",
+    )
+    agent = build(database, client, check_result_intent=True)
+
+    agent.ask("Which orders are worth anything?")
+
+    judged = client.prompts[1]
+    assert "these are facts, not guesses" in judged
+    assert "excluded nothing" in judged
