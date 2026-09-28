@@ -280,6 +280,102 @@ independently.
 **There is very little headroom left in this component.** It is built, it
 works, and it is at the ceiling the literature reports.
 
+## 3.8b What actually makes a repair pass work — and it is not the rows
+
+This repository has argued since `docs/08` that the intent check works
+*because it sees the returned rows*, where the critic did not. The evidence
+does not support that as the main mechanism.
+
+MapleRepair (arXiv 2501.09310), MAC-SQL + GPT-3.5 on BIRD, repaired / broken:
+
+| variant | repaired | broken | net |
+|---|---|---|---|
+| LLM-Plain — sees the SQL only | 140 | 47 | +93 |
+| **LLM-Exe — sees the execution result too** | **148** | **49** | **+99** |
+| **Rule-Exe — gated on a deterministic signal** | **75** | **4** | **+71** |
+
+Showing the rows is worth about **+6 questions out of 1,534** over showing
+the SQL alone. What changes the picture is the **gate**: 4 broken instead of
+49, at a 19:1 ratio instead of 3:1.
+
+The ungated version of this is genuinely dangerous. MAGIC (arXiv 2406.12692),
+BIRD dev, applying a repair guideline to *every* query: **56.52 → 46.14,
+−10.38**. Oracle-gated to only the incorrect queries, the same method gives
++0.7 to +2.6. MapleRepair, verbatim: *"an improper repairing attempt would
+exacerbate the errors!"* and *"LLM-Value introduces errors into 8.1% of the
+correct SQL queries."*
+
+**Correction to `docs/08`:** the claim that the intent check's advantage over
+the critic is having rows in its prompt is not supported by the literature.
+Its advantage is that it fires on 12.5% of questions rather than all of them,
+and that `guards/evidence.py` gates it on facts checked against the database.
+The rows are a secondary contributor. The measured 12 fixed / 4 broken is a
+gating result, not a visibility result.
+
+**The operational consequence is to hold the gate where it is, or tighten it.**
+The firing rate is 52/415 = 12.5%. Widening it moves this component toward
+MAGIC's −10.38, not toward more of the +8. The one direction worth exploring
+is *narrowing* onto DB-computed signals — SQLens's Abnormal Result is
+98.5–100% precise where an LLM judgement is not.
+
+CSC-SQL Table 2 is the warning for a small model specifically: an untrained
+reviser shown both SQLs *and* both execution results scores **−5.41 / −9.74**
+(3B) and **−2.21 / −4.79** (7B) against its own baseline. Rows in the prompt
+did not save it. Only GRPO training did.
+
+## 3.8c Nobody publishes the experiment we ran
+
+Across every system surveyed here — DAIL-SQL, CodeS, CHESS, XiYan-SQL,
+OpenSearch-SQL, CHASE-SQL, Alpha-SQL, Arctic, CSC-SQL, SLM-SQL,
+Agentar-Scale-SQL, DeepEye-SQL, DPC, Distillery — **not one votes on SQL
+strings.** "Self-consistency" in this field already means execution-result
+clustering. The only text-side arms that exist anywhere are LLM-judge
+variants, and both lose to execution clustering.
+
+So the A/B we ran — normalised-SQL-text voting against execution-result
+voting on the same pool — is not in the literature. Our zero is not anomalous;
+it is the measurement nobody bothered to publish, and *Query and Conquer*'s
+`Maj@10` column is the closest published equivalent.
+
+## 3.8d Implementation details, confirmed in shipped code
+
+If step 5 is ever built, these are settled rather than invented:
+
+* **Tie-break: shortest SQL in the largest cluster.** CHESS
+  `aggregate_sqls` clusters on `frozenset(tuple(row) for row in result)`,
+  drops non-OK, then `min(largest_cluster, key=len)`. Their ablation: 1
+  sample 61.22 → 3-sample execution consistency **64.62 (+3.40)**.
+* **Soft similarity is the shipped default, not a paper idea.**
+  Arctic-Text2SQL-R1's `major_voting` defaults to per-column value-count
+  distributions with a pairwise similarity matrix; the exact-`frozenset`
+  vote is the non-default mode.
+* **Empty results excluded explicitly.** OpenSearch-SQL §3.6: *"Exclude SQLs
+  that cannot be fixed and those that result in empty answers … among SQL
+  queries with the same answers, we select the one with the shortest
+  execution time."*
+* **Errored candidates never agree with each other** (MBR-Exec), so two
+  crashing queries cannot form a cluster of two.
+
+Three more same-system deltas, all inside the +0.5 to +2.5 band: Databricks
+RLVR 32B **+2.12**, OpenSearch-SQL on mini-dev **+2.4**, DeepEye-SQL with
+Gemma3-27B **+1.0**.
+
+## 3.8e Spend on candidates, not on repairs
+
+Olausson et al., *Is Self-Repair a Silver Bullet?* (arXiv 2306.09896),
+verbatim: *"increasing the number of initial programs consistently leads to
+relative performance gains … fixing n_p and increasing n_fr does not appear
+to be worth the additional cost … the most important factor is the diversity
+of the base samples generated up-front, rather than the diversity of the
+repairs sampled."*
+
+That is the same conclusion as §3.6 reached from our own zero: the pool is the
+constraint here, not the chooser. CHASE-SQL's error budget puts ~10pp of BIRD
+dev in "a correct candidate existed and was not chosen", and
+Agentar-Scale-SQL's *RL-trained* tournament recovers only 16% of its own
+11.21pp oracle gap. Selection is a fractional recovery of a gap that
+generation has to open first.
+
 ## 3.9 We cannot validate a small gain at n=415
 
 At 415 items, a +1.5pp effect is ~6 questions. With realistic discordance that
