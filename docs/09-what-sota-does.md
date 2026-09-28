@@ -391,12 +391,51 @@ resolvable. Mini-dev cannot settle the changes we are contemplating.
 
 Two measurements, neither costing a model call, settle this one.
 
-**BIRD's gold never returns nothing.** 0 of 498 successfully-executing gold
-queries on mini-dev return zero rows. There is no legitimately-empty gold to
-protect, so on this benchmark "returned no rows" cannot be a false alarm.
-(Spider is the opposite — Shen et al. report more false positives than true
-on five of six Spider configurations, which is why MAC-SQL disables the check
-there. Production Postgres needs the flag; mini-dev does not.)
+**BIRD's gold never returns nothing, and that is a policy, not luck.** 0 of
+498 successfully-executing mini-dev golds return zero rows — and BIRD's
+annotation protocol forbids it by construction. §3.4 of arXiv 2305.03111,
+verbatim:
+
+> *"the SQL validness will be confirmed that each SQL is executable and can
+> return a valid result from the database. The 'valid result' refers to the
+> set of results that is not 'NULL'. If the executed result set is 'NULL',
+> experts will make slight changes to the conditions of the questions until
+> the associated SQLs can provide a valid result set."*
+
+So on BIRD dev "zero rows means wrong" is sound **by design**, not merely
+measured. Three boundaries where it stops being sound:
+
+* **BIRD train.** Arctic-Text2SQL-R1 drops 9,428 → 8,017 (**15.0%**) of train
+  under an empty-or-slow filter while leaving dev at the full 1,534. If
+  few-shot exemplars are ever drawn from train (§3.3), the guarantee does not
+  cover them.
+* **Spider.** 3–5% of golds are legitimately empty across three sources, which
+  is why MAC-SQL's code disables this exact check on Spider only.
+* **Production.** No annotation policy protects a real warehouse. Luo
+  (VLDB 2006) measured **5.75%–38%** of real user queries returning empty
+  across three production workloads.
+
+### The trap this sets for us, stated plainly
+
+Some of the gain this guard would show on BIRD exists **because BIRD
+guarantees no empty golds**. Shipping the same rule against the production database would fire
+on legitimately-empty answers — of which there are real ones, "no orders
+cancelled last week" being a correct and useful reply — and trigger rewrites
+that can only make them worse.
+
+So the benchmark number for this feature is **partly an artifact of the
+benchmark**, and it must not be quoted as a product improvement. Two
+consequences for how it ships:
+
+1. **Default off outside SQLite/BIRD**, keyed on the dialect, not a global
+   flag someone can forget.
+2. **The production gate is a different check.** ErrorLLM's Rule7 — walk the
+   AST, resolve each literal to its column, confirm the literal exists in that
+   column's domain — is sound whether or not the answer is legitimately empty,
+   because it tests the *predicate* rather than the *result*.
+   `guards/evidence.py` already computes exactly this as
+   `_unmatched_literals`. The production feature is therefore mostly built;
+   what is missing is the rebinding step, not the detection.
 
 **Our own predictions hit it often, and it is nearly always right.**
 Re-executing all 500 stored statements from `full500-fast.json`:
@@ -501,7 +540,8 @@ One change per run, McNemar per question against corrected gold, against the
 | 1 | column descriptions + per-column distinct values | 2 | $0.22 | — |
 | 2 | full M-Schema syntax on top | 2 | $0.22 | drop if 1 already got it |
 | 3 | few-shot top-3 from BIRD train | 2 | $0.22 | — |
-| 4 | **empty-result guard + deterministic literal rebinding** | **2** | $0.22 | **16 questions at 100% precision** |
+| 4 | **literal-domain check + deterministic rebinding** (sound everywhere) | **2** | $0.22 | **16 questions at 100% precision on BIRD** |
+| 4b | empty-result trigger, **SQLite/BIRD only** | 2 | — | sound by BIRD policy, *not* in production |
 | 5 | value index (`prototypes/valindex.py`) behind a flag | 2 | $0.22 | 18 addressable, judge on production |
 | 6 | 3 renderings, temp 0, vote on execution results | 4 | $0.45 | **only if pass@8 − pass@1 > 5pp** |
 | ✗ | further schema reduction | — | — | settled: costs 7.63 at our table count |
