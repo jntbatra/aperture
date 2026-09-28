@@ -472,6 +472,57 @@ reported to the user as the answer.
    ErrorLLM measures naive self-correction at −1.52% on BIRD and **−14.15%**
    applied on top of OpenSearch-SQL.
 
+## 3.10b Three details that would have cost a day each
+
+**The empty-gold count is 0 of 1,534, not 0 of 498.** The full BIRD dev set
+was executed (dev.json md5 `af311ef1348945573b1e49e41309edb1`): 0 errors,
+**0 empty**, 1 all-NULL scalar (qid 1504). Our mini-dev measurement and the
+annotation policy in §3.10 both hold on the full set.
+
+**BIRD's scorer makes an empty prediction *correct* against an empty gold.**
+`evaluation_ex.py` compares `set(predicted) == set(ground_truth)`, and
+`set([]) == set([])` is True. On BIRD that never fires because there are no
+empty golds — but it means that on any corpus that *does* have them, every
+empty-triggered rewrite on a gold-empty question is a **guaranteed loss**.
+One more reason the production gate is the literal check, not the result.
+
+**The rule-based gate's precision is published, from the same paper as the
+fix/break table in §3.8b.** Shen et al. v1, Finding 5 (dropped from the FSE
+version): rule-based detection — non-executable, or empty, or NULL — has
+**95.9% precision**, detects 47.0% of incorrect queries, repairs 23.1%,
+mis-repairs 5.3%. Their Rule-Exe repairs **75 with 4 mis-repairs** against
+LLM-Plain's **140 with 47**, at **72.1% fewer LLM calls**. High precision,
+low recall, cheap — which is the shape we want.
+
+### An implementation trap in the matcher we would copy
+
+BRIDGE's shipped content encoder contains:
+
+```python
+if field_value.isupper() and match_score * s_match_score < 1:
+    continue
+# and, in schema_graph.py:
+if 'name' in field_node.normalized_name and match_score * s_match_score < 1:
+    continue
+```
+
+**On any column whose name contains `name`, BRIDGE silently discards every
+fuzzy match and keeps only exact ones.** Our production failure is a category
+column; if it is called `category_name` rather than `category`, a faithful
+port of BRIDGE would fail on exactly the case we are building this for, and
+fail silently.
+
+Both matchers were run against our example and both retrieve it —
+BRIDGE scores `'Cravings Deals'` → `'Cravings Deals ⭐'` at 0.9333 against a
+0.85 threshold, and CHESS's relative 0.9×max cut leaves it as the only
+survivor. The margin is comfortable here and thin for shorter values with
+longer decorations.
+
+Two smaller cautions on the retrieval side: E-SQL's `LIKE '%value%'` sweep
+**hurts on Challenging questions** (+0.68 when removed), and BRIDGE's paper
+(θ=0.5/0.8) and code (0.85/0.85) disagree with no explanation of which
+produced the published numbers.
+
 ## 3.11 Value retrieval: sized honestly, and smaller than it looks
 
 Every gold query on mini-dev was parsed and every string literal checked
