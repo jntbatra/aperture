@@ -190,6 +190,107 @@ deleted its own pipeline stage and scored the same. Its title is now
 
 ---
 
+## 3.6 The head-to-head exists, and it diagnoses our own zero
+
+Borchmann & Wydmuch (Snowflake), *Query and Conquer*, arXiv 2503.24364,
+Table 1. Same candidate pool, same N, one column for text voting and one for
+execution voting. Their `Maj@10` is defined as *"the majority vote with SQL
+normalization"* using sqlglot — **that is exactly what we built and measured
+at zero.** BIRD, temperature 0.7, single prompt, no schema linking:
+
+| model | greedy | **Maj@10 (text)** | Exec@10 | exec − text |
+|---|---|---|---|---|
+| Llama 3.2 3B | 18.6 | 20.2 | 25.6 | +5.4 |
+| Qwen 2.5 Coder 7B | 44.1 | 45.4 | 51.7 | +6.3 |
+| **Gemma 3 27B** | **53.1** | **55.5** | **55.6** | **+0.1** |
+| **Qwen 2.5 Coder 32B** | **55.0** | **55.2** | **57.1** | **+1.9** |
+| GPT-4o | 51.6 | 51.6 | 52.4 | +0.8 |
+
+Verbatim: *"weaker models benefit more from the proposed method."*
+
+Two things fall out, and the second is the important one.
+
+**Execution voting over text voting is worth +0.1 to +1.9 in our size class.**
+Not the +5.84 CHASE reports on Gemini with 21 structurally diverse candidates.
+
+**Gemma 3 27B gained +2.4 from text voting alone. We gained exactly zero.**
+That is the diagnosis. If plain text voting pays two points for a comparable
+model and pays nothing for us, our samples are not diverse enough to vote
+over — a *generation* problem, not a *selection* problem. Execution voting
+cannot fix that; it only merges candidates that already differ in text but
+agree in rows. Our oracle confirms it from the other side: 90.1% of pairs
+already return identical rows.
+
+SQL-PaLM names the same failure: *"after fine-tuning, LLM's sampling output
+converges to one single answer even using very high sampling temperature …
+self-consistency decoding is observed not to help much."*
+
+## 3.7 The best free signal in the whole literature
+
+SQLens (AWS/MIT/UChicago, arXiv 2506.04494) defines an **Abnormal Result**:
+the output is empty, or a column is entirely zeros, or a column is entirely
+NULL. Precision at identifying a **wrong** query, on BIRD, across three
+different generator systems:
+
+| base system | precision | recall |
+|---|---|---|
+| DIN-SQL | **99.68%** | 37.01% |
+| MAC-SQL | **100%** | 6.66% |
+| CHESS | **98.48%** | 13.27% |
+
+**A query returning nothing, or all zeros, or all NULLs is wrong 98.5–100% of
+the time.** That is a deterministic, zero-model-call correctness signal with
+near-perfect precision, and our `guards/evidence.py` already computes two
+thirds of it.
+
+Consequences, both free:
+* such a candidate must never win a vote (SIRIUS scores it 0 by convention);
+* it is the highest-precision trigger available for a repair pass.
+
+CodeT names the failure this prevents: *"solutions that always output 'None',
+'0', or an empty string … leading to a large cluster of incorrect solutions
+that significantly affects performance."* LEVER measured it hurting Spider.
+
+## 3.8 The intent check is already at the published ceiling
+
+SQLens publishes fix/break accounting, which is the honest frame for any
+repair pass. BIRD, out of 1,534:
+
+| base system | method | net | fixed | broke |
+|---|---|---|---|---|
+| CHESS (67.91) | generic self-reflection | **+12** | 23 | 11 |
+| CHESS | SQLens (signal-gated) | +28 | 40 | 12 |
+| MAC-SQL (59.32) | generic self-reflection | **+12** | 39 | 27 |
+| MAC-SQL | SQLens | +60 | 78 | 18 |
+| vanilla (59.07) | generic self-reflection | **+1** | 22 | 21 |
+
+Generic self-reflection on a strong base nets almost nothing because it breaks
+nearly as much as it fixes. Signal-gated correction nets 3–4× more.
+
+**Ours: +8 net on 415, fixed 12, broke 4 — a 3:1 ratio, in the SQLens band,
+not the self-reflection band.** As a percentage, +1.93pp sits between
+CHESS+SQLens (+1.83) and MAC-SQL+SQLens (+3.99).
+
+CHASE-SQL's fixer shrinks monotonically with generator strength: +3.83 on a
+57.75 generator, +0.93 on a 67.09 one. Self-Debugging: *"typically one
+debugging turn is sufficient, and the accuracy improvement after one turn is
+within 0.1%"* — which is `intent_repair_attempts = 1`, arrived at
+independently.
+
+**There is very little headroom left in this component.** It is built, it
+works, and it is at the ceiling the literature reports.
+
+## 3.9 We cannot validate a small gain at n=415
+
+At 415 items, a +1.5pp effect is ~6 questions. With realistic discordance that
+is p ≈ 0.3. Our +8 net only reached p = 0.077. **Clearing p < 0.05 needs
+roughly +12 net, ≈ +2.9pp** — the top of the plausible range for anything
+above, not the middle.
+
+So the eval set has to grow before the next A/B means anything. Full BIRD dev
+is 1,534 questions; there a +1.5pp effect is ~23 questions and becomes
+resolvable. Mini-dev cannot settle the changes we are contemplating.
+
 ## 4. The ablation order
 
 One change per run, McNemar per question against corrected gold, against the
@@ -200,8 +301,9 @@ One change per run, McNemar per question against corrected gold, against the
 | 1 | column descriptions + per-column distinct values | 2 | $0.22 | — |
 | 2 | full M-Schema syntax on top | 2 | $0.22 | drop if 1 already got it |
 | 3 | few-shot top-3 from BIRD train | 2 | $0.22 | — |
-| 4 | 3 renderings, temp 0, vote on execution results | 4 | $0.45 | **stop here if net ≤ 0** |
-| 5 | confidence-gated pairwise judge | 4–6 | $0.50 | only if 4 wins |
+| 4 | zero-cost: score empty/all-zero/all-NULL results as wrong | 2 | $0.22 | 98.5–100% precise |
+| 5 | 3 renderings, temp 0, vote on execution results | 4 | $0.45 | **only if pass@8 − pass@1 > 5pp** |
+| ✗ | any LLM judge or pairwise reranker | — | — | contraindicated by 5 sources |
 
 Steps 1–3 leave the call count at 2. Step 4 is the first that changes the cost
 curve, and §1 says it starts at a disadvantage: 90.1% of our candidate pairs
