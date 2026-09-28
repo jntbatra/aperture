@@ -192,6 +192,15 @@ def evaluate_one(
     engine = create_engine(url)
 
     try:
+        # BIRD ships per-column documentation as one CSV per table under each
+        # database's `database_description/`. It is keyed per database, so the
+        # path is resolved per question rather than set once on the config.
+        if config.column_docs_path == "AUTO":
+            described = data_root / "dev_databases" / db_id / "database_description"
+            config = config.model_copy(
+                update={"column_docs_path": str(described) if described.is_dir() else ""}
+            )
+
         agent = SqlAgent(engine, client=client, config=config)
         result = agent.ask(prompt_question)
 
@@ -308,6 +317,12 @@ def main() -> int:
         "--critic", action="store_true", help="Loop C: review the SQL before running it"
     )
     parser.add_argument(
+        "--column-docs", action="store_true",
+        help="feed BIRD's own per-column descriptions and value lists into the "
+             "schema. 77%% of mini-dev columns carry one and we used none of "
+             "them; both systems above us on the corrected leaderboard do",
+    )
+    parser.add_argument(
         "--intent", action="store_true",
         help="Loop D: after the query runs, ask whether the ROWS answer the "
              "question. Note that an `ask` cannot be answered by a harness and "
@@ -404,6 +419,8 @@ def main() -> int:
         overrides["use_critic"] = True
     if args.intent:
         overrides["check_result_intent"] = True
+    if args.column_docs:
+        overrides["column_docs_path"] = "AUTO"   # resolved per database below
     if args.vote:
         overrides["vote_samples"] = args.vote
     if args.vote_temperature is not None:
@@ -434,6 +451,7 @@ def main() -> int:
             (f"tier={config.quality_tier}", config.quality_tier != "fast"),
             ("critic", config.use_critic),
             ("intent", config.check_result_intent),
+            ("column-docs", bool(config.column_docs_path)),
             (f"vote={config.vote_samples}@{config.vote_temperature}", config.vote_samples > 1),
             ("decompose", config.decompose_questions),
             ("prescreen", config.prescreen_input),
@@ -583,6 +601,7 @@ def report(
                         for name in (
                             "quality_tier", "use_critic",
                             "check_result_intent", "intent_repair_attempts",
+                            "column_docs_path",
                             "vote_samples",
                             "vote_temperature", "decompose_questions",
                             "prescreen_input", "ambiguity_handling",

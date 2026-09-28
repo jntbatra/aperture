@@ -145,6 +145,19 @@ class Settings(BaseSettings):
     max_cell_chars: int = 100
     """Long text values are truncated before entering a prompt or a log."""
 
+    column_docs_path: str = ""
+    """Directory of BIRD-style ``<table>.csv`` column descriptions, or "".
+
+    Both systems above us on the corrected leaderboard feed the model a written
+    description per column; this project fed it none. BIRD ships the
+    documentation for all 11 of its databases and 77% of columns carry either a
+    meaning or an enumerated value list.
+
+    Empty means fall back to native column comments — PostgreSQL's
+    ``COMMENT ON COLUMN``, which is where a real deployment already keeps this.
+    SQLite has no such facility, which is the only reason the CSV path exists.
+    """
+
     value_profiling: bool = False
     """Show each column's distinct values instead of two whole sample rows.
 

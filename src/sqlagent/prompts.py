@@ -88,6 +88,7 @@ def render_schema(
     *,
     samples: list[TableSample] | None = None,
     profiles: list[TableProfile] | None = None,
+    docs: dict[tuple[str, str], object] | None = None,
     dialect: str = "postgres",
 ) -> str:
     """Describe a subset of the schema in a compact, model-readable form.
@@ -99,6 +100,10 @@ def render_schema(
             first). Order is preserved because models weight earlier context
             more heavily.
         samples: Optional sample rows, appended per table.
+        docs: Optional ``(table, column) -> ColumnDoc``. Rendered as a comment
+            on the column's own line, because a description three sections
+            away from the column it describes is a description the model has
+            to join up for itself.
 
     Returns:
         Plain text. Not JSON: it is roughly a third of the tokens for the same
@@ -115,13 +120,33 @@ def render_schema(
         # quoted when bare use would fold to something that does not exist.
         # The model copies what it is shown, so showing the correct form is
         # far more reliable than describing the rule and hoping.
-        columns = ", ".join(
+        rendered = [
             f"{quote_identifier(column.name, dialect=dialect)} {column.type}"
             + (" PRIMARY KEY" if column.primary_key else "")
             + ("" if column.nullable else " NOT NULL")
             for column in table.columns
+        ]
+
+        described = (
+            [(docs or {}).get((table.name, column.name)) for column in table.columns]
+            if docs
+            else []
         )
-        sections.append(f"  {quote_identifier(table.name, dialect=dialect)}({columns})")
+        if any(described):
+            # One column per line once there is documentation to attach. The
+            # single-line form is denser and is kept for the undocumented case,
+            # but a description has to sit next to its column to be usable.
+            sections.append(f"  {quote_identifier(table.name, dialect=dialect)}(")
+            for index, text in enumerate(rendered):
+                comma = "," if index < len(rendered) - 1 else ""
+                doc = described[index]
+                note = f"  -- {doc.render()}" if doc is not None else ""
+                sections.append(f"    {text}{comma}{note}")
+            sections.append("  )")
+        else:
+            sections.append(
+                f"  {quote_identifier(table.name, dialect=dialect)}({', '.join(rendered)})"
+            )
 
     joins = describe_edges(graph, set(tables))
     if joins:

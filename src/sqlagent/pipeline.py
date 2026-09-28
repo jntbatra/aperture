@@ -78,6 +78,7 @@ from sqlagent.report import (
     build_synthesis_prompt,
     decompose,
 )
+from sqlagent.schema.docs import from_comments, from_csv_directory
 from sqlagent.schema.graph import build_graph
 from sqlagent.schema.introspect import SchemaSnapshot, reflect_schema
 from sqlagent.summarise import SummaryCache, summarise
@@ -245,6 +246,7 @@ class SqlAgent:
         # before glossaries existed.
         # Question -> SQL. Bounded, per-agent, and holding no result data;
         # see `sqlagent.cache` for why the rows are deliberately not kept.
+        self._column_docs: dict | None = None
         self.cache = SqlCache(max_entries=self.config.cache_max_entries)
 
         # Standing context distilled from turns that have fallen out of the
@@ -687,6 +689,23 @@ class SqlAgent:
             if name.lower() in lowered or name.lower().rstrip("s") in lowered
         ]
 
+    def column_docs(self) -> dict:
+        """Per-column documentation, loaded once and cached.
+
+        Costs nothing per question: the CSVs are read on the first call and the
+        native-comment path is one inspector round trip. A deployment with no
+        documentation at all gets an empty mapping and the schema renders
+        exactly as it did before.
+        """
+        if self._column_docs is None:
+            if self.config.column_docs_path:
+                self._column_docs = from_csv_directory(self.config.column_docs_path)
+            else:
+                self._column_docs = from_comments(self.engine, sorted(self.snapshot.tables))
+            if self._column_docs:
+                logger.info("loaded documentation for %d columns", len(self._column_docs))
+        return self._column_docs
+
     def build_context(self, tables: list[str], trace: Trace) -> str:
         """Assemble the schema description for the prompt.
 
@@ -694,9 +713,15 @@ class SqlAgent:
         can contain) or plain row sampling (two whole rows). Profiling is the
         default because a filter needs vocabulary, not a specimen row.
         """
+        docs = self.column_docs()
+
         if self.config.sample_rows <= 0:
             return render_schema(
-                self.snapshot, self.graph, tables, dialect=self.dialect.sqlglot_name
+                self.snapshot,
+                self.graph,
+                tables,
+                docs=docs,
+                dialect=self.dialect.sqlglot_name,
             )
 
         if self.config.value_profiling:
@@ -715,6 +740,7 @@ class SqlAgent:
                 self.graph,
                 tables,
                 profiles=profiles,
+                docs=docs,
                 dialect=self.dialect.sqlglot_name,
             )
 
@@ -731,6 +757,7 @@ class SqlAgent:
             self.graph,
             tables,
             samples=samples,
+            docs=docs,
             dialect=self.dialect.sqlglot_name,
         )
 
