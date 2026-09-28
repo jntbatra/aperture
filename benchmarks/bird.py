@@ -321,6 +321,15 @@ def main() -> int:
         "--critic", action="store_true", help="Loop C: review the SQL before running it"
     )
     parser.add_argument(
+        "--exemplars", type=Path, default=None, metavar="FILE",
+        help="JSON of worked (question, SQL) examples to retrieve from. Use a "
+             "VERIFIED set: BIRD's own train split is 52.8%% mis-annotated",
+    )
+    parser.add_argument(
+        "--exemplar-count", type=int, default=None, metavar="N",
+        help="how many worked examples to show (default 3)",
+    )
+    parser.add_argument(
         "--rebind", action="store_true",
         help="on an empty result, rewrite filter literals the column does not "
              "contain, deterministically and with no model call",
@@ -432,6 +441,10 @@ def main() -> int:
         overrides["column_docs_path"] = "AUTO"   # resolved per database below
     if args.rebind:
         overrides["rebind_absent_literals"] = True
+    if args.exemplars:
+        overrides["exemplars_path"] = str(args.exemplars)
+    if args.exemplar_count is not None:
+        overrides["exemplar_count"] = args.exemplar_count
     if args.vote:
         overrides["vote_samples"] = args.vote
     if args.vote_temperature is not None:
@@ -464,6 +477,7 @@ def main() -> int:
             ("intent", config.check_result_intent),
             ("column-docs", bool(config.column_docs_path)),
             ("rebind", config.rebind_absent_literals),
+            (f"exemplars={config.exemplar_count}", bool(config.exemplars_path)),
             (f"vote={config.vote_samples}@{config.vote_temperature}", config.vote_samples > 1),
             ("decompose", config.decompose_questions),
             ("prescreen", config.prescreen_input),
@@ -614,6 +628,7 @@ def report(
                             "quality_tier", "use_critic",
                             "check_result_intent", "intent_repair_attempts",
                             "column_docs_path", "rebind_absent_literals",
+                            "exemplars_path", "exemplar_count",
                             "vote_samples",
                             "vote_temperature", "decompose_questions",
                             "prescreen_input", "ambiguity_handling",

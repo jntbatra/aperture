@@ -412,6 +412,7 @@ def make_generate_sql(agent: SqlAgent, config: Settings, emit):
                 dialect_rules=agent.dialect.prompt_rules,
                 glossary=glossary,
                 conversation=conversation,
+                exemplars=agent.exemplars_for(state["question"]),
             )
         else:
             prompt = build_repair_prompt(

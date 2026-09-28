@@ -50,6 +50,7 @@ from dataclasses import dataclass, field
 import networkx as nx
 from sqlalchemy import Engine
 
+from sqlagent import exemplars as exemplar_store
 from sqlagent.cache import SqlCache
 from sqlagent.config import (
     Settings,
@@ -253,6 +254,7 @@ class SqlAgent:
         # Question -> SQL. Bounded, per-agent, and holding no result data;
         # see `sqlagent.cache` for why the rows are deliberately not kept.
         self._column_docs: dict | None = None
+        self._exemplars = None
         self.cache = SqlCache(max_entries=self.config.cache_max_entries)
 
         # Standing context distilled from turns that have fallen out of the
@@ -711,6 +713,21 @@ class SqlAgent:
             if self._column_docs:
                 logger.info("loaded documentation for %d columns", len(self._column_docs))
         return self._column_docs
+
+    def exemplars_for(self, question: str) -> str:
+        """Worked examples most like this question, as a prompt block.
+
+        The index is built on first use and reused: BM25 over 2,064 questions
+        is about a millisecond, but tokenising them is not, and it does not
+        depend on the question.
+        """
+        if not self.config.exemplars_path:
+            return ""
+        if self._exemplars is None:
+            self._exemplars = exemplar_store.load(self.config.exemplars_path)
+        return exemplar_store.render(
+            self._exemplars.retrieve(question, k=self.config.exemplar_count)
+        )
 
     def build_context(self, tables: list[str], trace: Trace) -> str:
         """Assemble the schema description for the prompt.

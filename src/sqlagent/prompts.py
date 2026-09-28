@@ -200,6 +200,7 @@ def build_generation_prompt(
     dialect_rules: tuple[str, ...] = (),
     glossary: str = "",
     conversation: str = "",
+    exemplars: str = "",
 ) -> str:
     """The prompt that asks for SQL.
 
@@ -219,6 +220,11 @@ def build_generation_prompt(
     # hand before it reaches the question.
     if glossary:
         parts.append(glossary)
+    # Worked examples sit after the schema and before the question. They name
+    # tables from other databases, so putting them first would invite copying;
+    # putting them last would let the model read them as part of the ask.
+    if exemplars:
+        parts.append(exemplars)
     if conversation:
         parts.append(conversation)
     parts.append(f"Question: {question}")

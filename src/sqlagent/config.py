@@ -299,6 +299,29 @@ class Settings(BaseSettings):
     models is the cheapest partial defence.
     """
 
+    exemplars_path: str = ""
+    """JSON file of worked (question, SQL) examples, or "" for none.
+
+    Removing dynamic few-shot exemplars is the single largest delta in the
+    only fine-grained ablation published on BIRD mini-dev — -6.2 at generation
+    against -4.2 for schema extraction and -1.4 for value retrieval. This
+    pipeline answered every question zero-shot.
+
+    The file should hold *verified* examples. BIRD's own train split carries a
+    52.8% annotation error rate, and ReViSQL measured fine-tuning on it
+    scoring 7 points **below** not training at all, against +7.2 for an
+    expert-corrected subset. Exemplars teach form; wrong exemplars teach wrong
+    form.
+    """
+
+    exemplar_count: int = 3
+    """How many examples to show. 3 is DAIL-SQL's and GenaSQL's setting.
+
+    CHASE-SQL measured this directly and found quality beats quantity:
+    retrieved real training examples got *worse* from 5 to 125 examples
+    (58.80 -> 56.91). Nothing in that literature supports a large number.
+    """
+
     rebind_absent_literals: bool = False
     """On an empty result, rewrite filter literals the column does not contain.
 
