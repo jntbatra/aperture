@@ -62,6 +62,7 @@ from sqlagent.guards.cost import check as check_cost
 from sqlagent.guards.critic import review as critic_review
 from sqlagent.guards.evidence import gather as gather_evidence
 from sqlagent.guards.prescreen import screen as prescreen_question
+from sqlagent.guards.rebind import propose as propose_rebind
 from sqlagent.guards.validator import ValidationError, validate
 from sqlagent.intent import MAX_PREVIEW_CHARS, MAX_PREVIEW_ROWS
 from sqlagent.intent import check_intent as run_intent_check
@@ -623,14 +624,24 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
                 "attempts": attempts + 1,
             }
 
-        trace.attempts.append(Attempt(validated.sql, True, repaired_by=repaired_by))
+        # An empty result caused by a literal the column does not contain is
+        # the one failure here that is arithmetic rather than judgement, and
+        # it is repaired without a model call. Runs before the cache write, so
+        # a statement known to match nothing is never stored.
+        final_sql = validated.sql
+        if config.rebind_absent_literals and result.row_count == 0:
+            repaired = _rebind_empty_result(agent, config, final_sql, trace)
+            if repaired is not None:
+                final_sql, result = repaired
+
+        trace.attempts.append(Attempt(final_sql, True, repaired_by=repaired_by))
 
         # Remember the statement, never the rows. The query re-runs on the next
         # identical question, so the answer stays fresh; only the model calls
         # that wrote it are skipped.
         cache_key = state.get("cache_key")
         if cache_key and config.cache_sql:
-            agent.cache.put(cache_key, validated.sql)
+            agent.cache.put(cache_key, final_sql)
 
         # Advisory, after the fact: a SUM multiplied by a join produces no
         # error and a plausible-looking number. Surfaced rather than rejected,
@@ -639,7 +650,7 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
             trace.inflation_warnings = [
                 finding.render()
                 for finding in find_inflated_aggregates(
-                    validated.sql,
+                    final_sql,
                     dialect=agent.dialect.sqlglot_name,
                     one_to_many=one_to_many_map(agent.snapshot),
                 )
@@ -648,7 +659,7 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
                 logger.info("possible inflated aggregate: %s", trace.inflation_warnings)
 
         return {
-            "validated_sql": validated.sql,
+            "validated_sql": final_sql,
             "result": result,
             "last_error": None,
             "failure_kind": None,
@@ -806,6 +817,49 @@ def make_check_intent(agent: SqlAgent, config: Settings, emit):
         return PASS
 
     return check_intent
+
+
+def _rebind_empty_result(
+    agent: SqlAgent, config: Settings, sql: str, trace
+) -> tuple[str, QueryResult] | None:
+    """Rewrite absent literals and re-run. Returns None unless it helped.
+
+    Accepts the rewrite only when it turns an empty result into a non-empty
+    one. That makes the node monotone: the worst case is the original
+    statement and one wasted round trip, never a worse answer.
+    """
+    try:
+        with agent.engine.begin() as connection:
+            for statement in agent.dialect.session_setup(
+                statement_timeout_ms=config.statement_timeout_ms
+            ):
+                connection.execute(text(statement))
+            proposal = propose_rebind(
+                connection, sql=sql, dialect=agent.dialect.sqlglot_name
+            )
+        if proposal is None:
+            return None
+
+        rewritten, notes = proposal
+        result = execute(
+            agent.engine,
+            rewritten,
+            row_limit=config.row_limit,
+            statement_timeout_ms=config.statement_timeout_ms,
+            dialect=agent.dialect,
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory, never fatal
+        logger.debug("literal rebinding failed: %s", exc)
+        return None
+
+    if result.row_count == 0:
+        # The literal was not the problem. Keep the original rather than
+        # swapping one empty answer for a differently-worded empty answer.
+        return None
+
+    logger.info("rebound absent literals: %s", "; ".join(notes))
+    trace.rebound_literals.extend(notes)
+    return rewritten, result
 
 
 def make_widen_schema(agent: SqlAgent, config: Settings, emit):

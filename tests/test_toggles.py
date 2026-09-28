@@ -1064,3 +1064,69 @@ def test_established_facts_are_handed_over_rather_than_left_to_be_noticed(databa
     judged = client.prompts[1]
     assert "these are facts, not guesses" in judged
     assert "excluded nothing" in judged
+
+
+# --------------------------------------------------------------------------
+# Literal rebinding
+# --------------------------------------------------------------------------
+
+
+def test_an_absent_literal_is_rebound_without_a_model_call(database):
+    """The query runs, returns nothing, and nothing was the answer the user
+    got. The database can settle it; no model is asked."""
+    with database.begin() as connection:
+        connection.execute(text("INSERT INTO customers VALUES (3, 'Cravings Deals ⭐')"))
+
+    client = ScriptedClient(
+        "SELECT id FROM customers WHERE name = 'Cravings Deals'",
+        "That is customer 3.",
+    )
+    agent = build(database, client, rebind_absent_literals=True)
+
+    result = agent.ask("Which customer is Cravings Deals?")
+
+    assert result.ok
+    assert result.result is not None and result.result.row_count == 1
+    assert "Cravings Deals ⭐" in result.sql
+    assert result.trace.rebound_literals
+    assert client.calls == 2  # generate, answer — the repair cost nothing
+
+
+def test_a_query_that_returns_rows_is_never_rebound(database):
+    client = ScriptedClient("SELECT id FROM customers WHERE name = 'Ada'", "Customer 1.")
+    agent = build(database, client, rebind_absent_literals=True)
+
+    result = agent.ask("Which customer is Ada?")
+
+    assert result.ok
+    assert result.trace.rebound_literals == []
+
+
+def test_a_rewrite_that_still_returns_nothing_is_discarded(database):
+    """Swapping one empty answer for a differently-worded empty answer is not
+    a repair. The node has to be monotone or it is a liability."""
+    client = ScriptedClient(
+        "SELECT id FROM customers WHERE name = 'Nobody At All'", "No customers."
+    )
+    agent = build(database, client, rebind_absent_literals=True)
+
+    result = agent.ask("Which customer is Nobody At All?")
+
+    assert result.ok
+    assert "Nobody At All" in result.sql
+    assert result.trace.rebound_literals == []
+
+
+def test_rebinding_is_off_by_default(database):
+    with database.begin() as connection:
+        connection.execute(text("INSERT INTO customers VALUES (3, 'Cravings Deals ⭐')"))
+
+    client = ScriptedClient(
+        "SELECT id FROM customers WHERE name = 'Cravings Deals'", "No customers."
+    )
+    agent = build(database, client)
+
+    result = agent.ask("Which customer is Cravings Deals?")
+
+    assert result.result is not None and result.result.row_count == 0
+    assert result.trace.rebound_literals == []

@@ -299,6 +299,19 @@ class Settings(BaseSettings):
     models is the cheapest partial defence.
     """
 
+    rebind_absent_literals: bool = False
+    """On an empty result, rewrite filter literals the column does not contain.
+
+    Deterministic end to end: the database says the literal is absent, the
+    database proposes the replacement, and the rewrite is kept only if it
+    turns an empty result into a non-empty one. No model call.
+
+    Gated on an empty result rather than run on every query, because that is
+    the difference the literature actually measures. MapleRepair's ungated
+    repair fixes 148 and breaks 49; its gated variant fixes 75 and breaks 4.
+    MAGIC applied repair to every query on BIRD dev and fell 56.52 -> 46.14.
+    """
+
     check_result_intent: bool = False
     """After the query runs, ask a model whether the *rows* answer the question.
 

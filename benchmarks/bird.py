@@ -81,6 +81,9 @@ class Outcome:
     intent_rejections: tuple[str, ...] = ()
     """Defects the intent check named after seeing the rows, in order."""
 
+    rebound_literals: tuple[str, ...] = ()
+    """Filter literals rewritten to what the column actually stores."""
+
     intent_ask_withheld: str = ""
     """What it would have asked, had this harness been able to answer.
 
@@ -247,6 +250,7 @@ def evaluate_one(
             seconds=result.trace.seconds,
             answer=result.answer,
             intent_rejections=tuple(result.trace.intent_rejections),
+            rebound_literals=tuple(result.trace.rebound_literals),
             intent_asked=(
                 result.trace.intent_asks[0] if result.trace.intent_asks else ""
             ),
@@ -315,6 +319,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--critic", action="store_true", help="Loop C: review the SQL before running it"
+    )
+    parser.add_argument(
+        "--rebind", action="store_true",
+        help="on an empty result, rewrite filter literals the column does not "
+             "contain, deterministically and with no model call",
     )
     parser.add_argument(
         "--column-docs", action="store_true",
@@ -421,6 +430,8 @@ def main() -> int:
         overrides["check_result_intent"] = True
     if args.column_docs:
         overrides["column_docs_path"] = "AUTO"   # resolved per database below
+    if args.rebind:
+        overrides["rebind_absent_literals"] = True
     if args.vote:
         overrides["vote_samples"] = args.vote
     if args.vote_temperature is not None:
@@ -452,6 +463,7 @@ def main() -> int:
             ("critic", config.use_critic),
             ("intent", config.check_result_intent),
             ("column-docs", bool(config.column_docs_path)),
+            ("rebind", config.rebind_absent_literals),
             (f"vote={config.vote_samples}@{config.vote_temperature}", config.vote_samples > 1),
             ("decompose", config.decompose_questions),
             ("prescreen", config.prescreen_input),
@@ -601,7 +613,7 @@ def report(
                         for name in (
                             "quality_tier", "use_critic",
                             "check_result_intent", "intent_repair_attempts",
-                            "column_docs_path",
+                            "column_docs_path", "rebind_absent_literals",
                             "vote_samples",
                             "vote_temperature", "decompose_questions",
                             "prescreen_input", "ambiguity_handling",

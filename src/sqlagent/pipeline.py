@@ -165,6 +165,12 @@ class Trace:
     A rising count is not a regression. Each entry is a question that would
     otherwise have been answered by guessing at what was meant."""
 
+    rebound_literals: list[str] = field(default_factory=list)
+    """Filter literals rewritten to the value the column actually stores.
+
+    Each entry is a query that returned nothing and now returns something,
+    repaired without a model call."""
+
     intent_asks_withheld: list[str] = field(default_factory=list)
     """Questions it would have asked, where the deployment forbids asking.
 
