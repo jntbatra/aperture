@@ -581,6 +581,42 @@ Our own result — whole schema ≈ 1 hop, 2 hops worse — is mainstream. The
 caveat is that model strength, not table count, is the real variable, and
 EDBT 2026 shows a *fine-tuned* linker still helping weaker backbones.
 
+## 3.13 The noise floor, measured
+
+Two runs of the identical configuration, all 500 questions, nothing changed
+between them. `full500-fast.json` against `p0-noise-floor.json`, scored on
+corrected gold:
+
+| | n=415 |
+|---|---|
+| run 1 | 300/415 = **72.3%** |
+| run 2 | 300/415 = **72.3%** |
+| rescued | 11 |
+| broke | 11 |
+| **net** | **0** |
+| McNemar p | **1.000** |
+
+**The same number to the question, and 22 questions flipped to get there.**
+That is the noise: about eleven questions in each direction, symmetric, from
+generation alone at temperature 0.
+
+Two things follow.
+
+**McNemar is correctly calibrated on this harness.** A null change produces a
+null result with a p-value of exactly 1.000, and the churn does not bias in
+either direction. The earlier worry in §6d — that a bucket where nothing
+happened scored +5 — is ordinary variation of this size and the test already
+accounts for it. A paired McNemar remains the right instrument here.
+
+**The bar for a real effect is now a number rather than a feeling.** An
+intervention that rescues 11 and breaks 11 has done nothing. The intent
+check's +13 net over 21 rescued and 8 broken sits meaningfully outside that,
+which is why it reached p=0.024 on the whole set even though its attributable
+subset did not.
+
+Any change below roughly **±11 net questions (2.6pp)** cannot be separated
+from a re-roll on 415 scorable questions, whatever the point estimate says.
+
 ## 4. The ablation order
 
 One change per run, McNemar per question against corrected gold, against the
