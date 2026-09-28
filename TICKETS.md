@@ -174,6 +174,10 @@ Everything here is measured. See [docs/08-intent-design.md](docs/08-intent-desig
 | 77 | Is BFS better than dumping the whole schema on a small database? | **run** — 1 hop 62.7%, whole schema 61.3%, 2 hops 60.0%; p = 0.688, needs the full 500 before the default moves |
 | 78 | Score the full 500 on corrected gold, repeated | **half done** — 416 paired on corrected gold, both arms. The *repeated* half is now the important half: a no-change `fast` vs `fast` run is needed to establish the noise floor, because a bucket where nothing happened scored +9 at p = 0.023 |
 | 79 | Medium and thorough are sold and are worse than fast | open — the pricing charges for a negative |
+| 80 | Noise floor of the harness | **done** — identical configs: 11 rescued, 11 broke, net 0, p=1.000. Any effect under ±11 questions (2.6pp) is a re-roll |
+| 81 | BIRD column documentation into the schema | **built, measured, default off** — +4, p=0.608, +37% tokens |
+| 82 | Deterministic literal rebinding on an empty result | **built, measured, default off** — fired once in 500, +2, p=0.815 |
+| 83 | Few-shot exemplars from BIRD-Verified | **built, measured, DO NOT ENABLE** — −24, p=0.0027. Retrieved question/SQL pairs cost four times the noise floor |
 
 ### 75 — exactly where it stands
 
