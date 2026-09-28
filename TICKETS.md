@@ -230,20 +230,22 @@ It does beat what it replaces on the same measurement: the critic was rescued
 4 / broke 4 / net 0 at 1.9x, then net −6 inside `thorough`.
 
 **Full 500, 2026-09-28** — `full500-fast.json` vs `full500-intent.json`,
-416 paired on corrected gold. Detail in `docs/08-intent-design.md` §6d.
+415 paired, scored against `arcwise_plat_sql.json` (pinned in
+`benchmarks/CORRECTED_GOLD.md`). Detail in `docs/08-intent-design.md` §6d.
 
-| bucket | n | rescued | broke | net | p |
-|---|---|---|---|---|---|
-| all paired | 416 | 24 | 5 | +19 | 0.0005 |
-| **the check fired** | **52** | **13** | **3** | **+10** | **0.021** |
-| SQL differed, no fire | 111 | 11 | 2 | +9 | 0.023 |
-| SQL identical | 253 | 0 | 0 | 0 | 1.000 |
+| bucket | n | fast | + intent | rescued | broke | net | p |
+|---|---|---|---|---|---|---|---|
+| all paired | 415 | 72.3% | 75.4% | 21 | 8 | +13 | 0.024 |
+| **the check fired** | **52** | **30.8%** | **46.2%** | **12** | **4** | **+8** | **0.077** |
+| SQL differed, no fire | 110 | 70.0% | 74.5% | 9 | 4 | +5 | 0.267 |
+| SQL identical | 261 | 81.2% | 81.2% | 0 | 0 | 0 | 1.000 |
 
-Quote the second row: on the 52 questions it fired on, the baseline scored
-28.8% and it scored 48.1%. Do **not** quote the +19 or the p = 0.0005 — the
-third row is a bucket where the check changed nothing, and it scores nearly
-as well, so single-run variance on this harness is not zero-mean. 2.96M
-tokens against 1.50M; $0.434 against $0.224.
+Quote the second row and its p-value. The check fires on 15.6% of questions
+and picks the hard ones — baseline 30.8% on those against 81.2% elsewhere.
+2.96M tokens against 1.50M; $0.434 against $0.224.
+
+27% of questions produced different SQL with no mismatch firing. That is the
+noise floor for every future A/B here.
 
 **Not done:**
 0. **The noise floor.** `fast` vs `fast`, no change, same 500 — one run,

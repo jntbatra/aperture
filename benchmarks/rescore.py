@@ -24,6 +24,7 @@ exactly one, which is the point.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -40,6 +41,14 @@ def main() -> int:
     parser.add_argument("--corrected", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)
     args = parser.parse_args()
+
+    # The corrected gold is the basis of every number this prints, and it is
+    # not vendored — it is fetched from a repository that has no licence file.
+    # An earlier corrected set was kept in a temporary directory, was deleted
+    # mid-session, and took a day of "corrected" numbers with it: they could
+    # not be reproduced, and when the canonical file was fetched it scored
+    # 1.4 points differently. So every run says which file it used.
+    digest = hashlib.sha256(args.corrected.read_bytes()).hexdigest()
 
     run = json.loads(args.results.read_text())
     # Matched on (database, question text), not on question_id. The corrected
@@ -95,6 +104,8 @@ def main() -> int:
     correct_before = scored["same"] + scored["now_wrong"]
 
     print(f"{args.results.name}")
+    print(f"  corrected gold                       : {args.corrected.name}")
+    print(f"  sha256                               : {digest[:16]}...")
     print(f"  gold SQL that the correction changed : {gold_changed}/{len(run['outcomes'])}")
     print(f"  comparable questions                 : {judged}")
     print(f"  accuracy on ORIGINAL gold            : {correct_before/judged:.1%} "
