@@ -387,6 +387,110 @@ So the eval set has to grow before the next A/B means anything. Full BIRD dev
 is 1,534 questions; there a +1.5pp effect is ~23 questions and becomes
 resolvable. Mini-dev cannot settle the changes we are contemplating.
 
+## 3.10 The empty-result guard, measured end to end on our own data
+
+Two measurements, neither costing a model call, settle this one.
+
+**BIRD's gold never returns nothing.** 0 of 498 successfully-executing gold
+queries on mini-dev return zero rows. There is no legitimately-empty gold to
+protect, so on this benchmark "returned no rows" cannot be a false alarm.
+(Spider is the opposite — Shen et al. report more false positives than true
+on five of six Spider configurations, which is why MAC-SQL disables the check
+there. Production Postgres needs the flag; mini-dev does not.)
+
+**Our own predictions hit it often, and it is nearly always right.**
+Re-executing all 500 stored statements from `full500-fast.json`:
+
+| signal | n | scored correct | precision |
+|---|---|---|---|
+| **empty result** | **16** | **0** | **100.0%** |
+| a column entirely zero | 13 | 1 | 92.3% |
+| a column entirely NULL | 9 | 2 | 77.8% |
+| **all three** | **38 (7.6%)** | **3** | **92.1%** |
+
+**16 questions where we are wrong and can prove it before answering, with no
+model call.** Widening to empty-or-all-zero gives 29 questions at 96.6%.
+All-NULL is the weak one — `LEFT JOIN` producing NULL is often correct, which
+is exactly the exception SIRIUS names — so it belongs down-weighted, not
+excluded.
+
+This is the largest free signal found in the whole survey, and it is the
+`Cravings Deals ⭐` failure by another name: a query returning zero rows,
+reported to the user as the answer.
+
+### What to do with it, in order of cost
+
+1. **Never let a degenerate result win a vote.** Free, and it is what
+   OpenSearch-SQL and SIRIUS already do.
+2. **Deterministic literal rebinding, no model call.** On an empty result,
+   pull the string literals out with sqlglot — `guards/evidence.py` already
+   does this — and probe `SELECT DISTINCT col FROM tbl WHERE col LIKE
+   '%literal%' LIMIT 5`. If a near-match comes back, rewrite and re-execute.
+   SIRIUS recovers 223 of 1,043 empty candidates this way with zero LLM calls.
+3. **Only then, one retry with a *typed* prompt** naming the empty result and
+   the candidate values. Never a generic "fix this": DIN-SQL measures a
+   generic repair prompt at **−3.3** where its gentle variant is +0.9, and
+   ErrorLLM measures naive self-correction at −1.52% on BIRD and **−14.15%**
+   applied on top of OpenSearch-SQL.
+
+## 3.11 Value retrieval: sized honestly, and smaller than it looks
+
+Every gold query on mini-dev was parsed and every string literal checked
+against the question and the `evidence` hint:
+
+| bucket | n | % |
+|---|---|---|
+| no string literal in gold — retrieval cannot help | 208 | 41.6% |
+| every literal appears verbatim; the model can copy it | 274 | 54.8% |
+| a literal needs case correction only | 10 | 2.0% |
+| a literal is absent entirely | 8 | 1.6% |
+| **addressable** | **18** | **3.6%** |
+
+**3.6% is the entire surface.** A working prototype — stdlib only, SQLite
+FTS5 trigram index, no embeddings, no network — recovers 14 of the 18 (78%)
+in 60ms with zero model calls, and resolves `'Cravings Deals'` →
+`'Cravings Deals ⭐'`. Build: 4.5s and 43MB for all 11 databases. Preserved at
+`prototypes/valindex.py`.
+
+Ceiling **+2.8pp** if every one of the 14 is currently wrong and every one
+flips. Realistic **+1.3 to +1.6pp**. OpenSearch-SQL measured **−1.4 on this
+exact 500**, which agrees from the other direction.
+
+**The part that matters more than the benchmark number:** 10.2% of gold
+literals appear *only* in BIRD's `evidence` hint. Production has no evidence
+hint, so the addressable share there is **larger than 3.6%** — the benchmark
+understates this feature's production value, and it should be judged on that
+basis rather than on a mini-dev p-value. Also measured: **0 of 79 mini-dev
+tables declare `COLLATE NOCASE`**, so the 10 case-only mismatches genuinely
+fail and will not self-correct.
+
+## 3.12 Schema reduction is settled — stop working on it
+
+Google, VLDB 2025 (arXiv 2501.12372), Table 3, BIRD dev, **≤13 tables per
+request, 6.82 average** — our exact regime:
+
+| tables given | k=1 | k=7 | whole DB | whole dataset |
+|---|---|---|---|---|
+| EX | 38.01 | 54.69 | **62.32** | **62.58** |
+| retrieval precision | 77% | 23% | <35% | **<2%** |
+| tokens | 2,003 | 4,628 | 7,381 | 72,620 |
+
+Pruning to the top 7 tables costs **7.63 points**. Dumping 72k tokens of
+cross-database schema at under 2% precision costs **nothing**. Verbatim:
+*"the model does not get confused despite the presence of a large number of
+mostly irrelevant table definitions in the context."*
+
+Corroborated three ways: a McNemar-tested **−3.65pp (p = 1.4×10⁻⁶)** for
+schema linking on Llama-3.3-70B over BIRD dev; Distillery's −4.77 to −11.57
+across three models; and CHESS's own authors **deleting their Schema
+Selector** for their best BIRD configuration, having written that *"where the
+schema contains approximately 100 columns, schema linking becomes
+unnecessary."*
+
+Our own result — whole schema ≈ 1 hop, 2 hops worse — is mainstream. The
+caveat is that model strength, not table count, is the real variable, and
+EDBT 2026 shows a *fine-tuned* linker still helping weaker backbones.
+
 ## 4. The ablation order
 
 One change per run, McNemar per question against corrected gold, against the
@@ -397,8 +501,10 @@ One change per run, McNemar per question against corrected gold, against the
 | 1 | column descriptions + per-column distinct values | 2 | $0.22 | — |
 | 2 | full M-Schema syntax on top | 2 | $0.22 | drop if 1 already got it |
 | 3 | few-shot top-3 from BIRD train | 2 | $0.22 | — |
-| 4 | zero-cost: score empty/all-zero/all-NULL results as wrong | 2 | $0.22 | 98.5–100% precise |
-| 5 | 3 renderings, temp 0, vote on execution results | 4 | $0.45 | **only if pass@8 − pass@1 > 5pp** |
+| 4 | **empty-result guard + deterministic literal rebinding** | **2** | $0.22 | **16 questions at 100% precision** |
+| 5 | value index (`prototypes/valindex.py`) behind a flag | 2 | $0.22 | 18 addressable, judge on production |
+| 6 | 3 renderings, temp 0, vote on execution results | 4 | $0.45 | **only if pass@8 − pass@1 > 5pp** |
+| ✗ | further schema reduction | — | — | settled: costs 7.63 at our table count |
 | ✗ | any LLM judge or pairwise reranker | — | — | contraindicated by 5 sources |
 
 Steps 1–3 leave the call count at 2. Step 4 is the first that changes the cost
