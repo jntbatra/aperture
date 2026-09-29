@@ -93,7 +93,64 @@ be chance, but it may be drift in the serving stack — and every non-baseline
 arm ran *after* all five baselines, which would flatter them. Future sweeps
 should interleave arms rather than block them.
 
-## Arm by arm## Arm by arm
+## The complete matrix — 24 runs, 7 arms
+
+`benchmarks/analysis/sweepstats.py`, output in `sweep-results.txt`. Corrected
+gold, 415 questions scorable in every run.
+
+| arm | runs | mean | sd | mean net vs baseline | median p | p<0.05 |
+|---|---|---|---|---|---|---|
+| baseline | 8 | **72.4%** | 0.56 | — | — | — |
+| exemplars | 2 | 66.6% | 0.85 | **−23.9** | 0.0027 | **16/16** |
+| rebind | 2 | 74.0% | 0.34 | +6.6 | 0.173 | 4/16 |
+| column-docs | 3 | 74.5% | 1.10 | +8.6 | 0.143 | 7/24 |
+| docs+rebind | 2 | 74.5% | 0.00 | +8.6 | 0.144 | 2/16 |
+| intent | 3 | 74.5% | 0.77 | +9.0 | 0.108 | 6/24 |
+| **intent + docs** | 3 | **76.2%** | 0.85 | **+16.0** | **0.0151** | **19/24** |
+
+The null, from all 28 baseline-vs-baseline pairs: discordant mean 14.8, net
+mean **+0.6**, sd 3.3, **largest |net| 7**. Interleaving fixed the +2.8 offset
+sweep 1 showed — the pooled null is centred on zero, which is what a null
+should look like.
+
+### Intent and column documentation compose
+
+**+16.0 mean net, all 24 comparisons positive, range +9 to +23, 19 of 24
+individually significant.** More than double the null's largest excursion.
+
+They add almost exactly: intent alone +9.0, docs alone +8.6, together +16.0.
+That is what independent mechanisms look like, and it is the one prediction
+made in advance here that the data then confirmed — intent catches wrong rows
+after execution, documentation prevents wrong columns before generation.
+
+**72.4% → 76.2%, +3.8pp**, for one extra model call.
+
+### What I got wrong, twice, on partial data
+
+Mid-sweep I wrote that intent+docs "is not stacking" and was "below intent
+alone". That was read off **original gold** — the noisy target the whole
+`rescore.py` exercise exists to avoid. On corrected gold it is the best arm by
+1.7pp.
+
+Earlier I called column documentation "inside the noise" on a single +4 run.
+It is +8.6 across 24 comparisons.
+
+Both errors have the same shape: a conclusion drawn from one run, or from the
+wrong gold, stated without the hedge the evidence deserved.
+
+### The latency claim was a bug, not a measurement
+
+| run | wall clock |
+|---|---|
+| `full500-intent`, before the fix | **3,760s** |
+| sweep2-intent-1/2/3, after | 430s, 428s, 414s |
+
+Every `--intent` latency figure in this repository before commit `9b4ad99`
+measured a cartesian-product probe in `guards/evidence.py`, not the feature.
+The check costs roughly **20% more wall clock** than baseline, not 7.6x.
+Accuracy is unaffected — the probe only ever fed a prompt.
+
+## Arm by arm
 
 ### Column documentation — +4, inside the noise, 37% more tokens
 
