@@ -77,9 +77,20 @@ def mcnemar(r, w):
     return min(1.0, 2 * tail / 2**n)
 
 ARMS = {
-    "baseline":    [f"sweep-base-{i}.json" for i in (1, 2, 3, 4, 5)],
-    "column-docs": [f"sweep-docs-{i}.json" for i in (1, 2, 3)],
-    "exemplars":   [f"sweep-exem-{i}.json" for i in (1, 2, 3)],
+    # Sweep 1 blocked its arms (five baselines, then everything else) and its
+    # baseline-vs-baseline nets averaged +2.8 rather than 0. Sweep 2
+    # interleaved them. Both are pooled here; the per-arm spread is what
+    # matters and blocking only biases comparisons across sweeps.
+    "baseline": (
+        [f"sweep-base-{i}.json" for i in (1, 2, 3, 4, 5)]
+        + [f"sweep2-base-{i}.json" for i in (1, 2, 3)]
+    ),
+    "column-docs":  [f"sweep-docs-{i}.json" for i in (1, 2, 3)],
+    "exemplars":    [f"sweep-exem-{i}.json" for i in (1, 2, 3)],
+    "intent":       [f"sweep2-intent-{i}.json" for i in (1, 2, 3)],
+    "intent+docs":  [f"sweep2-intdocs-{i}.json" for i in (1, 2, 3)],
+    "rebind":       [f"sweep2-rebind-{i}.json" for i in (1, 2)],
+    "docs+rebind":  [f"sweep2-docsrebind-{i}.json" for i in (1, 2)],
 }
 scored = {
     a: [score(f) for f in fs
@@ -111,7 +122,9 @@ print(f"  net        : {sorted(nets)}")
 print(f"               mean {st.mean(nets):+.1f}, sd {st.stdev(nets):.1f}, "
       f"largest |net| {max(abs(x) for x in nets)}")
 
-for arm in ("column-docs", "exemplars"):
+for arm in ARMS:
+    if arm == "baseline":
+        continue
     if arm not in scored:
         continue
     ns, ps = [], []
