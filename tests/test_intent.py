@@ -350,3 +350,56 @@ def test_a_withheld_ask_is_recorded_not_just_logged():
 
     assert verdict.ok
     assert verdict.withheld_question == "which sense of twice?"
+
+
+def test_the_unfiltered_probe_refuses_a_join(connection):
+    """Stripping the WHERE off a join is a cartesian product.
+
+    This ran for 56 minutes at 189% CPU on two questions of a benchmark, and
+    it explains a 3,760-second run that was blamed on API throttling. SQLite
+    has no statement timeout in this codebase, so nothing stops it.
+    """
+    connection.execute(text("CREATE TABLE items (id INTEGER, order_id INTEGER)"))
+    connection.execute(text("INSERT INTO items VALUES (1, 1), (2, 2), (3, 3)"))
+
+    found = gather(
+        connection,
+        question="which orders have items?",
+        sql=(
+            "SELECT o.id FROM orders o JOIN items i ON i.order_id = o.id "
+            "WHERE o.status = 'DELIVERED'"
+        ),
+        dialect="sqlite",
+        row_count=2,
+    )
+
+    assert found.unfiltered_count is None
+
+
+def test_the_unfiltered_probe_refuses_two_tables_without_a_join_clause(connection):
+    """`FROM a, b WHERE a.x = b.y` is a join written the old way, and the
+    WHERE is the only thing keeping it from being a cross product."""
+    connection.execute(text("CREATE TABLE items (id INTEGER, order_id INTEGER)"))
+
+    found = gather(
+        connection,
+        question="q",
+        sql="SELECT o.id FROM orders o, items i WHERE i.order_id = o.id",
+        dialect="sqlite",
+        row_count=1,
+    )
+
+    assert found.unfiltered_count is None
+
+
+def test_a_single_table_query_is_still_probed(connection):
+    """The check the module exists for must survive the fix."""
+    found = gather(
+        connection,
+        question="orders worth anything",
+        sql="SELECT id FROM orders WHERE total > 0",
+        dialect="sqlite",
+        row_count=3,
+    )
+
+    assert found.unfiltered_count == 3

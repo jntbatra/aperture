@@ -41,3 +41,4 @@ data/control.db
 data/*.db
 *.sqlite
 *.sqlite3
+benchmarks/analysis/*.log

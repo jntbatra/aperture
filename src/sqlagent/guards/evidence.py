@@ -241,6 +241,24 @@ def _unfiltered_count(connection, statement, dialect: str) -> int | None:
     if statement.args.get("group") or statement.args.get("having"):
         return None
 
+    # The docstring above has always said "simple single-select". Nothing
+    # checked it, and on a join this probe is a cartesian product: the WHERE
+    # is what was holding the tables together, so stripping it counts every
+    # row against every other row.
+    #
+    # That is not theoretical. It ran for 56 minutes at 189% CPU on two
+    # questions of a 500-question benchmark, and it is why the first
+    # intent-check run took 3,760 seconds against 494 for the same questions
+    # without it — a slowdown blamed on API throttling at the time.
+    #
+    # SQLite makes it unrecoverable rather than merely slow: only the
+    # PostgreSQL dialect emits a statement timeout, so there is nothing to
+    # stop it.
+    if statement.args.get("joins"):
+        return None
+    if len({t.name for t in statement.find_all(exp.Table) if t.name}) > 1:
+        return None
+
     # An un-grouped aggregate returns exactly one row whatever the WHERE says,
     # so "the same number of rows with and without the filter" is true of every
     # correct COUNT query ever written. Comparing them fired on
