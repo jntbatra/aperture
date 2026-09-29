@@ -1,0 +1,20 @@
+  EXCLUDED sweep-exem-2.json: 339/500 questions produced no SQL
+questions scorable in every run: 415
+
+arm             n  accuracy per run                mean     sd
+baseline        5  71.6 71.8 73.3 72.8 72.8       72.4%  0.71
+column-docs     3  73.3 75.4 74.7                 74.5%  1.10
+exemplars       2  67.2 66.0                      66.6%  0.85
+
+NULL distribution — 10 baseline-vs-baseline pairs
+  discordant : mean 16.4, range 10-19
+  net        : [-2, -2, 0, 1, 4, 4, 5, 5, 6, 7]
+               mean +2.8, sd 3.3, largest |net| 7
+
+column-docs vs every baseline run (15 comparisons)
+  net : mean +8.4, sd 4.7, range +0..+16
+  p   : median 0.1849, below 0.05 in 4/15
+
+exemplars vs every baseline run (10 comparisons)
+  net : mean -24.1, sd 3.8, range -30..-18
+  p   : median 0.0027, below 0.05 in 10/10

@@ -19,24 +19,81 @@ Two runs of the **identical** configuration, nothing changed:
 The same score, reached by flipping 22 questions. That is what doing nothing
 looks like on this harness, and it is the bar every result below has to clear.
 
-## The results
+## The results — single run, and why they had to be repeated
 
 | arm | corrected gold | rescued | broke | net | p | tokens |
 |---|---|---|---|---|---|---|
 | baseline | 72.3% | — | — | — | — | 1.45M |
-| **noise floor** (no change) | 72.3% | 11 | 11 | 0 | 1.000 | 1.45M |
-| column documentation | 73.3% | 19 | 15 | **+4** | 0.608 | 1.98M |
-| literal rebinding | 72.8% | 10 | 8 | **+2** | 0.815 | 1.45M |
-| **few-shot exemplars** | **66.5%** | 18 | 42 | **−24** | **0.0027** | 1.63M |
-| docs + rebinding together | **73.7%** | 19 | 13 | **+6** | 0.377 | 2.00M |
+| noise floor (no change) | 72.3% | 11 | 11 | 0 | 1.000 | 1.45M |
+| column documentation | 73.3% | 19 | 15 | +4 | 0.608 | 1.98M |
+| literal rebinding | 72.8% | 10 | 8 | +2 | 0.815 | 1.45M |
+| few-shot exemplars | 66.5% | 18 | 42 | −24 | 0.0027 | 1.63M |
+| docs + rebinding | 73.7% | 19 | 13 | +6 | 0.377 | 2.00M |
 
-**Nothing cleared the noise floor. One change was significantly harmful.**
+On this evidence I wrote that nothing cleared the noise floor. **That was
+wrong about column documentation, and a multi-seed sweep is what found it.**
 
-The best configuration found is 73.7% — the two positive changes together,
-+6 questions over baseline at p = 0.377 and 38% more tokens. It is the
-highest number this pipeline has produced and it is still inside ±11.
+## The multi-seed sweep
 
-## Arm by arm
+Eleven more runs of the full 500 on the Flex tier, $1.31. Five baselines,
+three column-docs, three exemplars. `benchmarks/analysis/sweepstats.py`,
+output in `sweep-results.txt`.
+
+| arm | usable runs | accuracy per run | mean | sd |
+|---|---|---|---|---|
+| baseline | 5 | 71.6 71.8 73.3 72.8 72.8 | **72.4%** | 0.71 |
+| column-docs | 3 | 73.3 75.4 74.7 | **74.5%** | 1.10 |
+| exemplars | 2 | 67.2 66.0 | **66.6%** | 0.85 |
+
+The null, from all 10 baseline-vs-baseline pairs:
+
+* discordant pairs: mean **16.4**, range 10–19
+* net: `[-2, -2, 0, 1, 4, 4, 5, 5, 6, 7]` — **largest |net| = 7**
+
+And each arm against all five baselines:
+
+| arm | mean net | sd | range | median p | p < 0.05 |
+|---|---|---|---|---|---|
+| **column-docs** | **+8.4** | 4.7 | 0 .. +16 | 0.185 | 4/15 |
+| **exemplars** | **−24.1** | 3.8 | −30 .. −18 | 0.0027 | **10/10** |
+
+### Column documentation is probably real
+
++2.1pp, mean net +8.4, and **never negative in 15 comparisons** against a null
+whose largest excursion is 7. The single run that produced +4 was a low draw
+from this distribution, and calling it noise was a mistake of exactly the kind
+this sweep existed to catch — it caught it in my own conclusion.
+
+It is still not *settled*: median p is 0.185 and only 4 of 15 comparisons
+clear 0.05 individually. The arm means differ by 2.1pp with n=5 and n=3.
+Suggestive, not proven, and the 37% token cost is real.
+
+### Exemplars are confirmed harmful
+
+−5.8pp, mean net −24.1, **significant in 10 of 10 comparisons.** The
+single-run −24 reproduced almost exactly. This one is settled.
+
+### One run was an outage, not a measurement
+
+`sweep-exem-2` produced no SQL for **339 of 500** questions: 338 `Mantle call
+failed after 4 attempts` errors — connection resets, SSL EOF, DNS failure —
+over 3,498 seconds against roughly 400 for its siblings.
+
+Averaged in, it dragged that arm from 66.6% to 50.9% and turned a real
+−5.8pp effect into a meaningless −89 net. `sweepstats.py` now refuses any run
+where more than 5% of questions produce no SQL and prints the reason. A failed
+network is not a result, and a sweep that silently averages one is worse than
+no sweep.
+
+### A wrinkle worth recording
+
+The baseline-vs-baseline nets have mean **+2.8**, not 0, and the five baseline
+runs rise through the hour (71.6, 71.8, 73.3, 72.8, 72.8). With n=5 that may
+be chance, but it may be drift in the serving stack — and every non-baseline
+arm ran *after* all five baselines, which would flatter them. Future sweeps
+should interleave arms rather than block them.
+
+## Arm by arm## Arm by arm
 
 ### Column documentation — +4, inside the noise, 37% more tokens
 
