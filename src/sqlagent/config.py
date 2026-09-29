@@ -64,6 +64,18 @@ class Settings(BaseSettings):
     ap-southeast-2, ap-southeast-3, sa-east-1, us-gov-west-1.
     """
 
+    service_tier: str = ""
+    """Bedrock service tier: "" for standard, "flex" for half price.
+
+    Flex is priced at a 50% discount to standard and trades latency for it —
+    it is the right tier for a benchmark sweep, where nobody is waiting, and
+    the wrong one for a user-facing request.
+
+    Verified against the endpoint rather than assumed: it is sent as
+    ``service_tier`` in the request body and echoed back in the response, and
+    the camelCase spelling is silently ignored.
+    """
+
     mantle_signing_service: str = "bedrock-mantle"
     """SigV4 signing name. Matches the IAM action prefix ``bedrock-mantle:``."""
 

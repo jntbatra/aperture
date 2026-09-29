@@ -321,6 +321,11 @@ def main() -> int:
         "--critic", action="store_true", help="Loop C: review the SQL before running it"
     )
     parser.add_argument(
+        "--flex", action="store_true",
+        help="Bedrock Flex tier: half the price, more latency. Right for a "
+             "sweep nobody is waiting on",
+    )
+    parser.add_argument(
         "--exemplars", type=Path, default=None, metavar="FILE",
         help="JSON of worked (question, SQL) examples to retrieve from. Use a "
              "VERIFIED set: BIRD's own train split is 52.8%% mis-annotated",
@@ -441,6 +446,8 @@ def main() -> int:
         overrides["column_docs_path"] = "AUTO"   # resolved per database below
     if args.rebind:
         overrides["rebind_absent_literals"] = True
+    if args.flex:
+        overrides["service_tier"] = "flex"
     if args.exemplars:
         overrides["exemplars_path"] = str(args.exemplars)
     if args.exemplar_count is not None:
@@ -478,6 +485,7 @@ def main() -> int:
             ("column-docs", bool(config.column_docs_path)),
             ("rebind", config.rebind_absent_literals),
             (f"exemplars={config.exemplar_count}", bool(config.exemplars_path)),
+            (f"tier={config.service_tier}", bool(config.service_tier)),
             (f"vote={config.vote_samples}@{config.vote_temperature}", config.vote_samples > 1),
             ("decompose", config.decompose_questions),
             ("prescreen", config.prescreen_input),
@@ -628,7 +636,7 @@ def report(
                             "quality_tier", "use_critic",
                             "check_result_intent", "intent_repair_attempts",
                             "column_docs_path", "rebind_absent_literals",
-                            "exemplars_path", "exemplar_count",
+                            "exemplars_path", "exemplar_count", "service_tier",
                             "vote_samples",
                             "vote_temperature", "decompose_questions",
                             "prescreen_input", "ambiguity_handling",

@@ -282,6 +282,10 @@ class MantleClient:
                 self._config.temperature if temperature is None else temperature
             ),
         }
+        # Half price, more latency. Only ever set deliberately — a user
+        # waiting on an answer should not be paying for it in seconds.
+        if self._config.service_tier:
+            payload["service_tier"] = self._config.service_tier
 
         started = time.monotonic()
         data = self._post("/chat/completions", payload)
