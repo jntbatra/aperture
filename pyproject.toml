@@ -35,6 +35,10 @@ dependencies = [
     "boto3>=1.35.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
+    # CSV / Excel upload (sqlagent.ingest). Imported by the API at startup, so
+    # a clean install without them cannot serve at all.
+    "pandas>=2.2.0",
+    "openpyxl>=3.1.0",
 ]
 
 [project.optional-dependencies]
