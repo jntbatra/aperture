@@ -226,17 +226,17 @@ sql-agent/
 
 ## Current measurements
 
-Against the **full BIRD mini-dev set — all 500 questions**, using
-`qwen.qwen3-coder-480b-a35b-instruct`:
+The full BIRD mini-dev set, all 500 questions, `google.gemma-4-31b`, scored
+against **corrected gold** (`arcwise_plat_sql.json`; BIRD's own gold SQL is
+often wrong — see `benchmarks/CORRECTED_GOLD.md`). Details in
+[docs/10](docs/10-the-ablation.md).
 
-| Metric | Value |
+| | |
 |---|---|
-| Execution accuracy | **57.8%** (289/500) |
-| Correct on first attempt | 56.6% |
-| Needed a repair | 3.8% |
-| Mean time per question | 2.6s |
-| Model calls per question | 2 |
-| simple / moderate / challenging | 70.3% / 55.6% / 45.1% |
+| Execution accuracy (corrected gold, n=415) | **72.3%** (300/415), 2 model calls, 3.2s per question |
+| Same run on original BIRD gold, all 500 | 63.0% (315/500) |
+| Baseline across 8 repeat runs | 72.4% mean, sd 0.56 |
+| + result-intent check + column docs | **76.2%** mean over 3 runs, +16.0 net, median p=0.015 — one extra call |
 
 Published BIRD results place competent systems in the 40–60% band; human
 performance is about 92%. The questions are ambiguous, the schemas are real and
@@ -245,7 +245,9 @@ note.
 
 ### Against the previous implementation
 
-The same 500 questions, run through both pipelines:
+An earlier comparison, scored on original BIRD gold before the switch to
+gemma-4-31b and corrected gold. The same 500 questions, run through both
+pipelines:
 
 | | Accuracy | Mean latency |
 |---|---|---|
