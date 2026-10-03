@@ -6,6 +6,7 @@ that parses arguments and builds a model client at import time.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,10 +34,30 @@ def result_signature(rows: list, *, ordered: bool):
     return shaped if ordered else sorted(shaped, key=repr)
 
 
-def run_gold(url: str, sql: str) -> list[tuple]:
+SCORING_TIMEOUT_SECONDS = 30.0
+"""The agent's own statement timeout. A query the agent could not have run
+in time is not one the scorer should wait on: one LIKE-join prediction
+(codebase_community, question 637) ground on for many minutes under
+rescore.py and stalled the whole analysis behind it."""
+
+
+class ScoringTimeout(Exception):
+    """A query ran past ``SCORING_TIMEOUT_SECONDS``."""
+
+
+def run_gold(url: str, sql: str, *, timeout: float = SCORING_TIMEOUT_SECONDS) -> list[tuple]:
     engine = create_engine(url)
     try:
         with engine.connect() as connection:
-            return [tuple(r) for r in connection.execute(text(sql)).fetchall()]
+            raw = connection.connection.dbapi_connection
+            if timeout and hasattr(raw, "set_progress_handler"):
+                deadline = time.monotonic() + timeout
+                raw.set_progress_handler(lambda: time.monotonic() > deadline, 10_000)
+            try:
+                return [tuple(r) for r in connection.execute(text(sql)).fetchall()]
+            except Exception as exc:
+                if timeout and "interrupted" in str(exc):
+                    raise ScoringTimeout(sql[:80]) from exc
+                raise
     finally:
         engine.dispose()

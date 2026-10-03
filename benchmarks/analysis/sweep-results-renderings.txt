@@ -1,0 +1,49 @@
+  EXCLUDED sweep-exem-2.json: 339/500 questions produced no SQL
+questions scorable in every run: 415
+
+arm             n  accuracy per run                mean     sd
+baseline        8  71.6 71.8 73.3 72.8 72.8 72.5 72.0 72.3   72.4%  0.56
+column-docs     3  73.3 75.4 74.7                 74.5%  1.10
+exemplars       2  67.2 66.0                      66.6%  0.85
+intent          3  75.4 74.0 74.2                 74.5%  0.77
+intent+docs     3  75.4 76.1 77.1                 76.2%  0.85
+rebind          2  74.2 73.7                      74.0%  0.34
+docs+rebind     2  74.5 74.5                      74.5%  0.00
+intdocs+render  3  74.5 76.9 75.7                 75.7%  1.20
+
+NULL distribution — 28 baseline-vs-baseline pairs
+  discordant : mean 14.8, range 7-19
+  net        : [-5, -4, -3, -3, -3, -2, -2, -2, -2, -2, -1, -1, -1, 0, 1, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5, 5, 6, 7]
+               mean +0.6, sd 3.3, largest |net| 7
+
+column-docs vs every baseline run (24 comparisons)
+  net : mean +8.6, sd 4.4, range +0..+16
+  p   : median 0.1428, below 0.05 in 7/24
+
+exemplars vs every baseline run (16 comparisons)
+  net : mean -23.9, sd 3.4, range -30..-18
+  p   : median 0.0027, below 0.05 in 16/16
+
+intent vs every baseline run (24 comparisons)
+  net : mean +9.0, sd 3.5, range +3..+16
+  p   : median 0.1076, below 0.05 in 6/24
+
+intent+docs vs every baseline run (24 comparisons)
+  net : mean +16.0, sd 3.7, range +9..+23
+  p   : median 0.0151, below 0.05 in 19/24
+
+rebind vs every baseline run (16 comparisons)
+  net : mean +6.6, sd 2.5, range +2..+11
+  p   : median 0.1733, below 0.05 in 4/16
+
+docs+rebind vs every baseline run (16 comparisons)
+  net : mean +8.6, sd 2.2, range +5..+12
+  p   : median 0.1438, below 0.05 in 2/16
+
+intdocs+render vs every baseline run (24 comparisons)
+  net : mean +13.6, sd 4.7, range +5..+22
+  p   : median 0.0240, below 0.05 in 14/24
+
+intdocs+render vs every intent+docs run (9 comparisons)
+  net : mean -2.3, sd 5.3, range -11..+6
+  p   : median 0.4545, below 0.05 in 1/9

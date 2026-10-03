@@ -14,13 +14,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "benchmarks"))
-from bird_helpers import database_url, result_signature, run_gold  # noqa: E402
+from bird_helpers import (  # noqa: E402
+    ScoringTimeout,
+    database_url,
+    result_signature,
+    run_gold,
+)
 
 DATA = Path("/home/jntbatra/Projects/aperture/benchmarks/minidev/MINIDEV")
 GOLD = Path("/home/jntbatra/Projects/aperture/benchmarks/corrected-gold/data/arcwise_plat_sql.json")
 corrected = {(c["db_id"], " ".join(c["question"].split())): c for c in json.loads(GOLD.read_text())}
 
 _cache = {}
+_gold = {}
 def ok(o, fix):
     if not o["predicted_sql"]:
         return False
@@ -29,8 +35,18 @@ def ok(o, fix):
         ordered = "order by" in fix["SQL"].lower()
         url = database_url(DATA, o["db_id"])
         try:
-            _cache[key] = result_signature(run_gold(url, o["predicted_sql"]), ordered=ordered) == \
-                          result_signature(run_gold(url, fix["SQL"]), ordered=ordered)
+            gold_key = (o["db_id"], fix["SQL"])
+            if gold_key not in _gold:
+                # Uncapped and run once: one corrected gold query takes over
+                # 20s, and re-running it for every distinct prediction across
+                # thirty runs is what made this script crawl.
+                _gold[gold_key] = run_gold(url, fix["SQL"], timeout=0)
+            gold = result_signature(_gold[gold_key], ordered=ordered)
+            try:
+                mine = result_signature(run_gold(url, o["predicted_sql"]), ordered=ordered)
+            except ScoringTimeout:
+                mine = None  # the agent's own timeout would have failed it too
+            _cache[key] = mine is not None and mine == gold
         except Exception:
             _cache[key] = None
     return _cache[key]
@@ -91,6 +107,10 @@ ARMS = {
     "intent+docs":  [f"sweep2-intdocs-{i}.json" for i in (1, 2, 3)],
     "rebind":       [f"sweep2-rebind-{i}.json" for i in (1, 2)],
     "docs+rebind":  [f"sweep2-docsrebind-{i}.json" for i in (1, 2)],
+    # Run days after sweep 2, not interleaved with it — a time-of-day or
+    # endpoint drift would land on this arm alone. Read its head-to-head below
+    # with that in mind.
+    "intdocs+render": [f"renderings-intdocs-{i}.json" for i in (1, 2, 3)],
 }
 scored = {
     a: [score(f) for f in fs
@@ -135,6 +155,20 @@ for arm in ARMS:
             ns.append(r - w)
             ps.append(mcnemar(r, w))
     print(f"\n{arm} vs every baseline run ({len(ns)} comparisons)")
+    print(f"  net : mean {st.mean(ns):+.1f}, sd {st.stdev(ns):.1f}, "
+          f"range {min(ns):+d}..{max(ns):+d}")
+    hits = sum(1 for p in ps if p < 0.05)
+    print(f"  p   : median {st.median(ps):.4f}, below 0.05 in {hits}/{len(ps)}")
+
+if "intdocs+render" in scored and "intent+docs" in scored:
+    ns, ps = [], []
+    for t in scored["intdocs+render"]:
+        for b in scored["intent+docs"]:
+            r = sum(1 for k in keys if t[k] and not b[k])
+            w = sum(1 for k in keys if b[k] and not t[k])
+            ns.append(r - w)
+            ps.append(mcnemar(r, w))
+    print(f"\nintdocs+render vs every intent+docs run ({len(ns)} comparisons)")
     print(f"  net : mean {st.mean(ns):+.1f}, sd {st.stdev(ns):.1f}, "
           f"range {min(ns):+d}..{max(ns):+d}")
     hits = sum(1 for p in ps if p < 0.05)

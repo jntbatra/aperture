@@ -32,7 +32,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from bird_helpers import database_url, result_signature, run_gold  # noqa: E402
+from bird_helpers import (  # noqa: E402
+    ScoringTimeout,
+    database_url,
+    result_signature,
+    run_gold,
+)
 
 
 def main() -> int:
@@ -80,11 +85,14 @@ def main() -> int:
         url = database_url(args.data, o["db_id"])
         try:
             ordered = "order by" in fix["SQL"].lower()
-            gold_rows = run_gold(url, fix["SQL"])
-            mine = run_gold(url, o["predicted_sql"])
-            now = result_signature(mine, ordered=ordered) == result_signature(
-                gold_rows, ordered=ordered
-            )
+            gold_rows = run_gold(url, fix["SQL"], timeout=0)
+            try:
+                mine = run_gold(url, o["predicted_sql"])
+                now = result_signature(mine, ordered=ordered) == result_signature(
+                    gold_rows, ordered=ordered
+                )
+            except ScoringTimeout:
+                now = False  # the agent's own timeout would have failed it too
         except Exception:
             scored["gold_failed"] += 1
             continue
