@@ -498,6 +498,9 @@ questions, cross-session preferences — remains unbuilt.
 
 ## Six defects found by using it on real data
 
+Item names, ids and figures from the private database in this section are
+replaced with illustrative values; the failures themselves are as observed.
+
 A long session against the production database surfaced failures that 500 benchmark
 questions did not, because the benchmark asks one-shot questions and scores
 result sets — it cannot see a conversation drift, and it never reads the English

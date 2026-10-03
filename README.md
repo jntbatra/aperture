@@ -217,7 +217,7 @@ sql-agent/
 │   ├── ambiguity.py         How often does the ambiguity check agree with itself
 │   └── ambiguity_questions.json  30 labelled questions, 15 vague / 15 clear
 ├── glossaries/
-│   └── example.jsonDeclared units and terms for one real database
+│   └── example.json         Declared units and terms for one real database
 ├── tests/               487 tests
 └── docs/                The documentation table above
 ```

@@ -3,7 +3,8 @@
 The failure this exists for
 ---------------------------
 On a real database, revenue was reported as "₹1,234,500". The true figure was
-**₹12,345**. ``order_items.price`` stores paise — ``12500`` means ₹125.00 — and
+**₹12,345** (figures illustrative; the 100× ratio is real).
+``order_items.price`` stores paise — ``12500`` means ₹125.00 — and
 nothing in the schema says so. The column's type is ``integer`` and its name is
 ``price``. Elsewhere in the same session the same kind of figure was labelled
 ``$``, for an Indian business.

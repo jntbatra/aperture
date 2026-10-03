@@ -3,6 +3,7 @@
     "Domain facts about the production database that its schema cannot express.",
     "",
     "Every entry here was verified against the live database, not guessed.",
+    "Figures, dish names and counts are illustrative; the private values are not published.",
     "The money entries exist because revenue was reported as Rs 1,234,500 when",
     "the true figure was Rs 12,345: order_items.price stores paise, and nothing",
     "in the schema says so (the column is an integer named 'price').",
