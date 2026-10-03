@@ -914,6 +914,22 @@ def test_the_intent_check_can_reject_a_result_and_force_a_rewrite(database):
     ]
 
 
+def test_the_intent_check_can_be_turned_on_for_one_question(database):
+    """The SDK's `expensive` tier. Off on the server, on for this question only,
+    and off again for the next one — a per-request choice, not a deployment."""
+    client = ScriptedClient(
+        "SELECT count(*) FROM customers", '{"verdict": "answers"}', "There are 2.",
+        "SELECT count(*) FROM customers", "There are 2.",
+    )
+    agent = build(database, client)
+
+    agent.ask("How many customers?", options={"check_result_intent": True})
+    assert client.calls == 3
+
+    agent.ask("How many customers?")
+    assert client.calls == 5
+
+
 def test_the_intent_check_sees_the_rows_not_just_the_sql(database):
     """The critic's whole defect. It reads code and guesses; on the worst
     failure seen on real data it approved the query, and what gave it away was

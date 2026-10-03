@@ -764,6 +764,7 @@ OVERRIDABLE = frozenset(
         "prescreen_input",
         "ambiguity_handling",
         "decompose_questions",
+        "check_result_intent",
         "cache_sql",
         "conversation_window",
         "summarise_conversation",

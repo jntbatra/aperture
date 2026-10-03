@@ -112,6 +112,10 @@ class AskOptions(BaseModel):
     prescreen_input: bool | None = None
     ambiguity_handling: Literal["best_effort", "ask_human"] | None = None
     decompose_questions: bool | None = None
+    check_result_intent: bool | None = None
+    """After the query runs, ask whether the rows answer the question. One extra
+    model call; +3.8pp with column docs on corrected BIRD (docs/10). This is what
+    the SDK's ``expensive`` tier turns on."""
     cache_sql: bool | None = None
 
     summarise_conversation: bool | None = None
@@ -390,6 +394,17 @@ TOGGLE_DESCRIPTIONS: list[ToggleInfo] = [
             "make writes impossible either way."
         ),
         cost="+1 model call",
+        kind="switch",
+    ),
+    ToggleInfo(
+        name="check_result_intent",
+        label="Check the rows answer the question",
+        help=(
+            "After the query runs, a second look at the rows: do they answer what "
+            "was asked? If not, the query is rewritten once. The best measured "
+            "setting — 72.4% to 76.2% on corrected BIRD with column docs."
+        ),
+        cost="+1 model call, ~2.7x tokens",
         kind="switch",
     ),
     ToggleInfo(
