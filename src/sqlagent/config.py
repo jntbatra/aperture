@@ -406,6 +406,21 @@ class Settings(BaseSettings):
     up for the questions voting is switched on for, and kept everywhere else.
     """
 
+    candidate_renderings: int = 1
+    """Write the first query once per schema rendering and vote on the rows.
+
+    1 disables it. Up to 3: the compact rendering, CREATE TABLE statements, and
+    one line per column. Each candidate is generated at temperature 0, so the
+    only diversity is how the schema was shown — GenaSQL's N-rep idea, where
+    voting over temperature samples had almost nothing to choose between here
+    (the two existing runs returned identical rows on 90.1% of questions).
+
+    The candidates are executed and grouped by result, not by SQL text. A clear
+    majority wins outright; a split goes to one extra model call that sees the
+    first rows of each. Only the first attempt fans out — repairs use the
+    default rendering. Off until it is measured.
+    """
+
     decompose_questions: bool = False
     """Split a multi-part question into sub-questions, answer each, synthesise.
 

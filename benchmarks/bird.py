@@ -360,6 +360,11 @@ def main() -> int:
         help="temperature for voting samples (voting is pointless at 0)",
     )
     parser.add_argument(
+        "--renderings", type=int, default=None, metavar="N",
+        help="write the first query once per schema rendering (up to 3) and "
+        "vote on the rows each returns",
+    )
+    parser.add_argument(
         "--decompose", action="store_true",
         help="split a multi-part question and answer each part",
     )
@@ -456,6 +461,8 @@ def main() -> int:
         overrides["vote_samples"] = args.vote
     if args.vote_temperature is not None:
         overrides["vote_temperature"] = args.vote_temperature
+    if args.renderings:
+        overrides["candidate_renderings"] = args.renderings
     if args.decompose:
         overrides["decompose_questions"] = True
     if args.prescreen:
@@ -637,7 +644,7 @@ def report(
                             "check_result_intent", "intent_repair_attempts",
                             "column_docs_path", "rebind_absent_literals",
                             "exemplars_path", "exemplar_count", "service_tier",
-                            "vote_samples",
+                            "vote_samples", "candidate_renderings",
                             "vote_temperature", "decompose_questions",
                             "prescreen_input", "ambiguity_handling",
                             "glossary_path", "cache_sql",

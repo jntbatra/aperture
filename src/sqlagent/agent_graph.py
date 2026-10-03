@@ -47,6 +47,7 @@ neighbourhood.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -78,12 +79,13 @@ from sqlagent.llm.mantle import extract_sql
 # so by the time anything here runs `sqlagent.pipeline` is fully initialised.
 from sqlagent.pipeline import Attempt, Trace
 from sqlagent.prompts import (
+    RENDER_STYLES,
     SQL_SYSTEM_PROMPT,
     build_generation_prompt,
     build_repair_prompt,
 )
 from sqlagent.schema.retrieval import Neighbourhood, expand, widen
-from sqlagent.voting import tally
+from sqlagent.voting import result_key, tally, vote_on_results
 
 if TYPE_CHECKING:  # pragma: no cover - only needed for the annotation below
     from sqlagent.pipeline import SqlAgent
@@ -429,6 +431,14 @@ def make_generate_sql(agent: SqlAgent, config: Settings, emit):
         model = agent.pick_model(tables)
         samples = vote_samples(config)
 
+        renderings = min(max(1, config.candidate_renderings), len(RENDER_STYLES))
+        if last_error is None and samples <= 1 and renderings > 1:
+            return {
+                "sql": _generate_across_renderings(
+                    agent, config, state, prompt, model, renderings
+                )
+            }
+
         if samples <= 1:
             completion = agent.client.complete(
                 prompt, model=model, system=SQL_SYSTEM_PROMPT
@@ -466,6 +476,134 @@ def make_generate_sql(agent: SqlAgent, config: Settings, emit):
         return {"sql": vote.sql}
 
     return generate_sql
+
+
+TIEBREAK_PROMPT = """Several SQL queries were written for the same question and
+returned different results. Pick the one whose RESULT correctly answers the
+question.
+
+Question: {question}
+
+Schema:
+{schema}
+
+{candidates}
+
+Reply with only the number of the correct candidate."""
+
+
+def _try_candidate(
+    agent: SqlAgent, config: Settings, sql: str, tables: list[str]
+) -> QueryResult | None:
+    """Validate, cost-check and run one candidate. ``None`` if any step refuses.
+
+    The same three gates as ``validate_and_execute``, in the same order — a
+    candidate is never executed on a weaker check than the query that ships.
+    """
+    if not sql or not sql.strip():
+        return None
+    try:
+        validated = validate(
+            sql,
+            dialect=agent.dialect.sqlglot_name,
+            row_limit=config.row_limit,
+            allowed_tables=set(tables) if tables else None,
+        )
+        check_cost(
+            agent.engine,
+            validated.sql,
+            dialect=agent.dialect,
+            max_cost=config.max_plan_cost,
+            max_estimated_rows=config.max_plan_rows,
+        )
+        return execute(
+            agent.engine,
+            validated.sql,
+            row_limit=config.row_limit,
+            statement_timeout_ms=config.statement_timeout_ms,
+            dialect=agent.dialect,
+        )
+    except (ValidationError, CostRejected, ExecutionError):
+        return None
+
+
+def _generate_across_renderings(
+    agent: SqlAgent,
+    config: Settings,
+    state: AgentState,
+    default_prompt: str,
+    model: str,
+    renderings: int,
+) -> str:
+    """One candidate per schema layout, chosen by the rows they return.
+
+    Each candidate is written at temperature 0, so they differ only in how the
+    schema was shown to the model. They are executed, grouped by result, and a
+    clear majority wins. A split costs one more call, which sees the first rows
+    of each contender — two SQL strings alone do not say which is right; the
+    rows often do.
+    """
+    trace = state["trace"]
+    tables = state["tables"]
+    question = state["question"]
+
+    candidates: list[str] = []
+    results: list[QueryResult | None] = []
+    for style in RENDER_STYLES[:renderings]:
+        if style == "compact":
+            prompt = default_prompt
+        else:
+            prompt = build_generation_prompt(
+                question,
+                agent.build_context(tables, trace, style=style),
+                dialect=agent.dialect.prompt_name,
+                dialect_rules=agent.dialect.prompt_rules,
+                glossary=agent.glossary_for(tables),
+                conversation=render_conversation(
+                    state.get("history", []),
+                    window=config.conversation_window,
+                    summary=state.get("history_summary", ""),
+                ),
+                exemplars=agent.exemplars_for(question),
+            )
+        completion = agent.client.complete(prompt, model=model, system=SQL_SYSTEM_PROMPT)
+        trace.record(completion)
+        sql = extract_sql(completion.text)
+        candidates.append(sql)
+        results.append(_try_candidate(agent, config, sql, tables))
+
+    vote = vote_on_results(
+        [result_key(r.rows) if r is not None else None for r in results]
+    )
+    trace.vote_samples = len(candidates)
+    trace.vote_agreement = vote.agreement
+
+    if not vote.contenders:
+        return candidates[vote.index]
+
+    blocks = []
+    for number, index in enumerate(vote.contenders, start=1):
+        result = results[index]
+        preview = result.preview(limit=10) if result is not None else "(failed)"
+        blocks.append(
+            f"Candidate {number}:\nSQL: {candidates[index]}\nResult:\n{preview}"
+        )
+    completion = agent.client.complete(
+        TIEBREAK_PROMPT.format(
+            question=question,
+            schema=state["schema_text"],
+            candidates="\n\n".join(blocks),
+        ),
+        model=model,
+    )
+    trace.record(completion)
+    match = re.search(r"\d+", completion.text or "")
+    if match:
+        choice = int(match.group()) - 1
+        if 0 <= choice < len(vote.contenders):
+            return candidates[vote.contenders[choice]]
+    logger.info("renderings: tie-break unparseable, keeping the first contender")
+    return candidates[vote.contenders[0]]
 
 
 def make_criticise(agent: SqlAgent, config: Settings, emit):

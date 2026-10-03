@@ -729,12 +729,17 @@ class SqlAgent:
             self._exemplars.retrieve(question, k=self.config.exemplar_count)
         )
 
-    def build_context(self, tables: list[str], trace: Trace) -> str:
+    def build_context(
+        self, tables: list[str], trace: Trace, *, style: str = "compact"
+    ) -> str:
         """Assemble the schema description for the prompt.
 
         Two modes, chosen by configuration: value profiling (what each column
         can contain) or plain row sampling (two whole rows). Profiling is the
         default because a filter needs vocabulary, not a specimen row.
+
+        ``style`` picks the layout (see ``render_schema``); the facts are the
+        same in every style.
         """
         docs = self.column_docs()
 
@@ -745,6 +750,7 @@ class SqlAgent:
                 tables,
                 docs=docs,
                 dialect=self.dialect.sqlglot_name,
+                style=style,
             )
 
         if self.config.value_profiling:
@@ -765,6 +771,7 @@ class SqlAgent:
                 profiles=profiles,
                 docs=docs,
                 dialect=self.dialect.sqlglot_name,
+                style=style,
             )
 
         samples = sample_tables(
@@ -782,6 +789,7 @@ class SqlAgent:
             samples=samples,
             docs=docs,
             dialect=self.dialect.sqlglot_name,
+            style=style,
         )
 
     def glossary_for(self, tables: list[str]) -> str:

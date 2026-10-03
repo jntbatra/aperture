@@ -90,6 +90,7 @@ def render_schema(
     profiles: list[TableProfile] | None = None,
     docs: dict[tuple[str, str], object] | None = None,
     dialect: str = "postgres",
+    style: str = "compact",
 ) -> str:
     """Describe a subset of the schema in a compact, model-readable form.
 
@@ -104,14 +105,22 @@ def render_schema(
             on the column's own line, because a description three sections
             away from the column it describes is a description the model has
             to join up for itself.
+        style: ``compact`` (the default), ``ddl`` or ``columns``. The same
+            facts written three ways, for ``candidate_renderings``: a model
+            that misreads one layout often reads another correctly.
 
     Returns:
         Plain text. Not JSON: it is roughly a third of the tokens for the same
         information, and models parse it just as reliably.
     """
-    sections: list[str] = ["Tables:"]
+    if style not in RENDER_STYLES:
+        raise ValueError(f"unknown schema style {style!r}")
 
-    for table_name in tables:
+    sections: list[str] = ["Tables:"]
+    if style != "compact":
+        sections = _render_tables_alternate(snapshot, tables, docs, dialect, style)
+
+    for table_name in tables if style == "compact" else ():
         table = snapshot.tables.get(table_name)
         if table is None:
             continue
@@ -149,7 +158,11 @@ def render_schema(
             )
 
     joins = describe_edges(graph, set(tables))
-    if joins:
+    if joins and style == "ddl":
+        sections.append("")
+        sections.append("-- Join conditions (use these exactly):")
+        sections.extend(f"--   {predicate}" for predicate in joins)
+    elif joins:
         sections.append("")
         sections.append("Relationships (use these exact join conditions):")
         sections.extend(f"  {predicate}" for predicate in joins)
@@ -173,6 +186,64 @@ def render_schema(
         sections.extend(f"  {sample.render()}" for sample in samples)
 
     return "\n".join(sections)
+
+
+RENDER_STYLES = ("compact", "ddl", "columns")
+"""Schema layouts, in the order ``candidate_renderings`` uses them."""
+
+
+def _render_tables_alternate(
+    snapshot: SchemaSnapshot,
+    tables: list[str],
+    docs: dict[tuple[str, str], object] | None,
+    dialect: str,
+    style: str,
+) -> list[str]:
+    """The table section in the ``ddl`` or ``columns`` layout.
+
+    Only the layout changes. Every column, type, key and description the
+    compact form shows is shown here too, so a candidate written from this
+    rendering is not working from less information.
+    """
+    sections: list[str] = []
+    for table_name in tables:
+        table = snapshot.tables.get(table_name)
+        if table is None:
+            continue
+        quoted_table = quote_identifier(table.name, dialect=dialect)
+
+        if style == "ddl":
+            sections.append(f"CREATE TABLE {quoted_table} (")
+            for index, column in enumerate(table.columns):
+                comma = "," if index < len(table.columns) - 1 else ""
+                doc = (docs or {}).get((table.name, column.name))
+                note = f"  -- {doc.render()}" if doc is not None else ""
+                sections.append(
+                    f"  {quote_identifier(column.name, dialect=dialect)} {column.type}"
+                    + (" PRIMARY KEY" if column.primary_key else "")
+                    + ("" if column.nullable else " NOT NULL")
+                    + comma
+                    + note
+                )
+            sections.append(");")
+        else:
+            sections.append(f"Table {quoted_table}:")
+            for column in table.columns:
+                traits = [column.type]
+                if column.primary_key:
+                    traits.append("primary key")
+                if not column.nullable:
+                    traits.append("not null")
+                doc = (docs or {}).get((table.name, column.name))
+                meaning = f": {doc.render()}" if doc is not None else ""
+                sections.append(
+                    f"  - {quoted_table}.{quote_identifier(column.name, dialect=dialect)}"
+                    f" ({', '.join(traits)}){meaning}"
+                )
+        sections.append("")
+    if sections and sections[-1] == "":
+        sections.pop()
+    return sections
 
 
 def render_dialect_rules(dialect_name: str, rules: tuple[str, ...]) -> str:

@@ -30,8 +30,12 @@ What this does not do
 ---------------------
 It does not *execute* the candidates and compare result sets. That would be a
 stronger signal and costs three times the database load per question, on a
-production replica, for a benchmark-time gain. Not worth it by default; the
-hook is here if it ever is.
+production replica, for a benchmark-time gain. Not worth it by default.
+
+``vote_on_results`` below is that stronger signal, used only by
+``candidate_renderings``: candidates written at temperature 0 from different
+schema layouts differ in SQL text far more than in rows, so text voting would
+split where the results agree.
 """
 
 from __future__ import annotations
@@ -108,3 +112,71 @@ def tally(candidates: list[str], *, dialect: str) -> Vote | None:
             return Vote(sql=sql, agreement=agreement, total=len(usable))
 
     return None  # pragma: no cover - unreachable; the winner came from `usable`
+
+
+# ---------------------------------------------------------------------------
+# Voting on results, for candidates written from different schema renderings
+# ---------------------------------------------------------------------------
+
+
+def result_key(rows: tuple[tuple[object, ...], ...]) -> tuple[str, ...]:
+    """A form in which two result sets that hold the same rows compare equal.
+
+    Order-insensitive and column-name-insensitive: ``ORDER BY`` and aliases
+    differ between correct queries far more often than the rows do. Floats are
+    rounded so that ``AVG`` computed two ways does not split a majority on the
+    fifteenth decimal place.
+    """
+
+    def cell(value: object) -> str:
+        if isinstance(value, float):
+            return repr(round(value, 4))
+        return repr(value)
+
+    return tuple(sorted("|".join(cell(v) for v in row) for row in rows))
+
+
+@dataclass(frozen=True, slots=True)
+class ResultVote:
+    """Which candidate the rows chose, and whether they were decisive."""
+
+    index: int
+    """The winning candidate, or the first candidate when none ran."""
+
+    agreement: int
+    """How many candidates returned the winner's rows."""
+
+    contenders: tuple[int, ...]
+    """When undecided, one representative candidate per tied result group.
+
+    Empty when the vote was decisive or when nothing ran at all — there is
+    nothing for a tie-break to choose between in either case.
+    """
+
+
+def vote_on_results(keys: list[tuple[str, ...] | None]) -> ResultVote:
+    """Group candidates by the rows they returned and pick the largest group.
+
+    ``None`` is a candidate that failed to validate or execute; it cannot win.
+    A group strictly larger than every other, with at least two members, wins
+    outright. Anything else — every candidate different, or a tie — is
+    undecided, and the representatives go to a tie-break.
+    """
+    groups: dict[tuple[str, ...], list[int]] = {}
+    for index, key in enumerate(keys):
+        if key is not None:
+            groups.setdefault(key, []).append(index)
+
+    if not groups:
+        return ResultVote(index=0, agreement=0, contenders=())
+
+    ranked = sorted(groups.values(), key=lambda members: (-len(members), members[0]))
+    best = ranked[0]
+    if len(ranked) == 1:
+        return ResultVote(index=best[0], agreement=len(best), contenders=())
+    if len(best) >= 2 and len(best) > len(ranked[1]):
+        return ResultVote(index=best[0], agreement=len(best), contenders=())
+
+    top = len(best)
+    contenders = tuple(members[0] for members in ranked if len(members) == top)
+    return ResultVote(index=best[0], agreement=top, contenders=contenders)
