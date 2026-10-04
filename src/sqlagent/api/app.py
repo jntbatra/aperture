@@ -65,12 +65,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine
 from starlette.concurrency import run_in_threadpool
 
-from sqlagent.api.auth_routes import (
-    PrincipalDep,
-    enforce_and_clamp,
-    record_question,
-)
-from sqlagent.api.auth_routes import router as auth_router
 from sqlagent.clarify import CLARIFICATION_ERROR
 from sqlagent.config import OVERRIDABLE, Settings, settings
 from sqlagent.conversation import Turn, carryable_result
@@ -508,21 +502,6 @@ class HealthResponse(BaseModel):
     light_model: str
     strong_model: str
 
-    auth_required: bool = False
-    """Whether every request must resolve to a tenant.
-
-    Reported because "is this deployment open?" must be answerable without
-    reading the environment of a running container. A hosted instance that
-    quietly came up with authentication off looks identical to one that did
-    not, from the outside, until someone notices — and the whole point of a
-    health endpoint is that a machine can check.
-    """
-
-    encryption_configured: bool = False
-    """Whether a key is loaded for tenant credentials. Never the key, and never
-    how many — only that there is one, which is what a readiness probe needs to
-    refuse traffic to an instance that cannot decrypt anything."""
-
 
 def to_response(result: AgentResult, conversation_id: str | None = None) -> AskResponse:
     query = result.result
@@ -659,7 +638,7 @@ app.add_middleware(
     # are forbidden by the spec, and a wildcard with credentials would let any
     # site a signed-in user visits call this API as them.
     allow_credentials=True,
-    # DELETE is needed for revoking keys, conversations and connections.
+    # DELETE is needed for removing conversations and datasets.
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
@@ -667,7 +646,6 @@ app.add_middleware(
 # Sign-up, sign-in, sign-out, whoami and usage. Mounted after CORS so those
 # routes get the same headers as everything else — a login that works in curl
 # and fails in a browser is the most confusing possible version of this bug.
-app.include_router(auth_router)
 
 
 # --------------------------------------------------------------------------
@@ -684,13 +662,11 @@ def health(agent: AgentDep) -> HealthResponse:
         schema_version=agent.snapshot.version,
         light_model=config.light_model,
         strong_model=config.strong_model,
-        auth_required=config.require_auth,
-        encryption_configured=bool(config.secret_key),
     )
 
 
 @app.get("/api/schema", response_model=SchemaResponse)
-def get_schema(agent: AgentDep, principal: PrincipalDep) -> SchemaResponse:
+def get_schema(agent: AgentDep) -> SchemaResponse:
     """The database structure, for the UI's schema browser."""
     snapshot = agent.snapshot
     tables = [
@@ -708,7 +684,7 @@ def get_schema(agent: AgentDep, principal: PrincipalDep) -> SchemaResponse:
 
 
 @app.post("/api/ask", response_model=AskResponse)
-async def ask(request: AskRequest, principal: PrincipalDep) -> AskResponse:
+async def ask(request: AskRequest) -> AskResponse:
     """Answer a question and return everything at once."""
     agent = await run_in_threadpool(resolve_agent, request.dataset_id)
     conversation_id = await run_in_threadpool(
@@ -716,25 +692,11 @@ async def ask(request: AskRequest, principal: PrincipalDep) -> AskResponse:
     )
     history = await run_in_threadpool(_load_history, conversation_id)
 
-    # Quota before any work, clamping included. Raises 402 when the allowance
-    # is spent; a tier the plan does not include is quietly reduced rather than
-    # refused, because turning one over-ambitious field into an outage is a bad
-    # trade for an upsell.
-    options = await run_in_threadpool(
-        enforce_and_clamp,
-        principal,
-        request.options.overrides() if request.options else None,
-    )
+    options = request.options.overrides() if request.options else None
 
     result = await run_in_threadpool(
         agent.ask, request.question, history=history, options=options
     )
-
-    # Counted after, not before. A question that failed on a model timeout must
-    # not consume an allowance — a customer charged for an error writes a
-    # support ticket that costs more than the question did.
-    if result.ok:
-        await run_in_threadpool(record_question, principal, options)
 
     await run_in_threadpool(_record, result, request.dataset_id, conversation_id)
     return to_response(result, conversation_id)
@@ -882,7 +844,6 @@ def _record(
 
 @app.get("/api/ask/stream")
 async def ask_stream(
-    principal: PrincipalDep,
     question: Annotated[str, Query(min_length=1, max_length=2000)],
     dataset_id: Annotated[str | None, Query()] = None,
     conversation_id: Annotated[str | None, Query()] = None,
@@ -912,13 +873,6 @@ async def ask_stream(
             status_code=400, detail=f"invalid options: {exc}"
         ) from exc
 
-    # The same enforcement as /api/ask. Two handlers answering questions means
-    # two places a quota can be forgotten, so both call the one function and a
-    # test asserts neither passes raw options to the agent.
-    parsed_options = await run_in_threadpool(
-        enforce_and_clamp, principal, parsed_options
-    )
-
     agent = await run_in_threadpool(resolve_agent, dataset_id)
     thread_id = await run_in_threadpool(_ensure_conversation, conversation_id, dataset_id)
     history = await run_in_threadpool(_load_history, thread_id)
@@ -940,8 +894,6 @@ async def ask_stream(
                 options=parsed_options,
                 on_progress=on_progress,
             )
-            if result.ok:
-                await run_in_threadpool(record_question, principal, parsed_options)
             await run_in_threadpool(_record, result, dataset_id, thread_id)
             await queue.put(("result", to_response(result, thread_id).model_dump()))
         except Exception as exc:  # noqa: BLE001
@@ -984,7 +936,6 @@ async def ask_stream(
 
 @app.get("/api/schema/graph", response_model=GraphResponse)
 def schema_graph(
-    principal: PrincipalDep,
     dataset_id: Annotated[str | None, Query()] = None,
 ) -> GraphResponse:
     """The foreign-key graph, with positions, ready for the client to draw.
@@ -1049,7 +1000,7 @@ def schema_graph(
 
 @app.post("/api/datasets", response_model=DatasetResponse)
 async def upload_dataset(
-    file: Annotated[UploadFile, File()], principal: PrincipalDep
+    file: Annotated[UploadFile, File()]
 ) -> DatasetResponse:
     """Upload a CSV, Excel workbook or PostgreSQL dump and make it queryable.
 
@@ -1081,7 +1032,7 @@ async def upload_dataset(
 
 
 @app.get("/api/datasets", response_model=list[DatasetResponse])
-def list_datasets(principal: PrincipalDep) -> list[DatasetResponse]:
+def list_datasets() -> list[DatasetResponse]:
     return [
         DatasetResponse(
             id=d["id"], name=d["name"], kind=d["kind"], tables=d["tables"],
@@ -1092,7 +1043,7 @@ def list_datasets(principal: PrincipalDep) -> list[DatasetResponse]:
 
 
 @app.delete("/api/datasets/{dataset_id}")
-def delete_dataset(dataset_id: str, principal: PrincipalDep) -> dict:
+def delete_dataset(dataset_id: str) -> dict:
     if not get_store().delete_dataset(dataset_id):
         raise HTTPException(status_code=404, detail=f"No dataset '{dataset_id}'")
     get_dataset_agent.cache_clear()
@@ -1109,15 +1060,14 @@ def delete_dataset(dataset_id: str, principal: PrincipalDep) -> dict:
 
 
 @app.get("/api/conversations", response_model=list[ConversationSummary])
-def list_conversations(
-    principal: PrincipalDep, limit: Annotated[int, Query(ge=1, le=200)] = 50
+def list_conversations( limit: Annotated[int, Query(ge=1, le=200)] = 50
 ) -> list[dict]:
     """Threads, most recently used first."""
     return get_store().list_conversations(limit=limit)
 
 
 @app.post("/api/conversations", response_model=ConversationSummary)
-def create_conversation(request: NewConversationRequest, principal: PrincipalDep) -> dict:
+def create_conversation(request: NewConversationRequest) -> dict:
     """Start an empty thread.
 
     Rarely needed — asking a question with no ``conversation_id`` creates one
@@ -1132,7 +1082,7 @@ def create_conversation(request: NewConversationRequest, principal: PrincipalDep
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=ConversationDetail)
-def get_conversation(conversation_id: str, principal: PrincipalDep) -> ConversationDetail:
+def get_conversation(conversation_id: str) -> ConversationDetail:
     """One thread and every turn in it, oldest first.
 
     This is what the UI calls to restore a thread after a reload, so the
@@ -1152,7 +1102,6 @@ def get_conversation(conversation_id: str, principal: PrincipalDep) -> Conversat
 
 @app.get("/api/search", response_model=list[SearchHit])
 def search_turns(
-    principal: PrincipalDep,
     q: Annotated[str, Query(min_length=1, max_length=200)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[SearchHit]:
@@ -1212,7 +1161,7 @@ process ever sees — one, plus an entry per uploaded dataset.
 
 
 @app.get("/api/suggestions", response_model=SuggestionsResponse)
-def suggestions(agent: AgentDep, principal: PrincipalDep) -> SuggestionsResponse:
+def suggestions(agent: AgentDep) -> SuggestionsResponse:
     """Opening questions, proposed once per schema version.
 
     Keyed on the schema hash, which already changes on exactly the events that
@@ -1233,69 +1182,13 @@ def suggestions(agent: AgentDep, principal: PrincipalDep) -> SuggestionsResponse
 
 
 @app.get("/api/stats", response_model=StatsResponse)
-def stats(principal: PrincipalDep) -> dict:
+def stats() -> dict:
     """Aggregate numbers across every question ever asked."""
     return get_store().stats()
 
 
-class PlanResponse(BaseModel):
-    """One tier, as the pricing page needs it.
-
-    Served rather than hardcoded in the client. The numbers are pricing policy
-    and they live in `saas/plans.py`; a second copy in a React component is a
-    copy that will disagree with billing on the day one of them changes.
-    """
-
-    name: str
-    label: str
-    price_monthly_usd: int
-    price_monthly_inr: int
-    custom_priced: bool
-    """True means "talk to us", not "free". Zero means both in the table, and
-    the difference must not be left to whoever writes the template."""
-
-    questions_per_month: int
-    detailed_per_month: int
-    max_quality_tier: str
-    strong_model: bool
-    max_connected_databases: int
-    max_uploaded_datasets: int
-    max_seats: int
-    row_limit: int
-    history_retention_days: int
-    features: list[str]
-
-
-@app.get("/api/plans", response_model=list[PlanResponse])
-def plans() -> list[PlanResponse]:
-    """The tiers. Public: a pricing page is read before anyone has an account."""
-    from sqlagent.saas.plans import CUSTOM_PRICED, PLANS
-
-    return [
-        PlanResponse(
-            name=plan.name,
-            label=plan.label,
-            price_monthly_usd=plan.price_monthly_usd,
-            price_monthly_inr=plan.price_monthly_inr,
-            custom_priced=plan.name in CUSTOM_PRICED,
-            questions_per_month=plan.questions_per_month,
-            detailed_per_month=plan.detailed_per_month,
-            max_quality_tier=plan.max_quality_tier,
-            strong_model=plan.strong_model,
-            max_connected_databases=plan.max_connected_databases,
-            max_uploaded_datasets=plan.max_uploaded_datasets,
-            max_seats=plan.max_seats,
-            row_limit=plan.row_limit,
-            history_retention_days=plan.history_retention_days,
-            features=sorted(plan.features),
-        )
-        for plan in PLANS.values()
-    ]
-
-
 @app.get("/api/drift", response_model=DriftResponse)
 def drift(
-    principal: PrincipalDep,
     recent: Annotated[int, Query(ge=10, le=2000)] = 100,
     baseline: Annotated[int, Query(ge=10, le=5000)] = 300,
 ) -> DriftResponse:
@@ -1334,7 +1227,7 @@ def drift(
 
 
 @app.delete("/api/conversations/{conversation_id}")
-def delete_conversation(conversation_id: str, principal: PrincipalDep) -> dict:
+def delete_conversation(conversation_id: str) -> dict:
     if not get_store().delete_conversation(conversation_id):
         raise HTTPException(status_code=404, detail=f"No conversation '{conversation_id}'")
     return {"deleted": conversation_id}

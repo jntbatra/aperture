@@ -77,8 +77,6 @@ export interface Answer {
 export interface SqlAgentClientOptions {
   /** e.g. `http://127.0.0.1:8000`. No trailing `/api`. */
   baseUrl: string;
-  /** Only when the service runs with `SQLAGENT_REQUIRE_AUTH=true`. */
-  apiKey?: string;
   defaultTier?: Tier;
   /** Per-request timeout. The expensive tier can take 10s+ on a large schema. */
   timeoutMs?: number;
@@ -110,7 +108,6 @@ export const TIER_OPTIONS: Record<Tier, Record<string, unknown>> = {
 
 export class SqlAgentClient {
   private readonly baseUrl: string;
-  private readonly apiKey?: string;
   private readonly defaultTier: Tier;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
@@ -118,7 +115,6 @@ export class SqlAgentClient {
   constructor(options: SqlAgentClientOptions) {
     if (!options.baseUrl) throw new Error("baseUrl is required");
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.apiKey = options.apiKey;
     this.defaultTier = options.defaultTier ?? "cheap";
     this.timeoutMs = options.timeoutMs ?? 60_000;
     const f = options.fetch ?? (globalThis as { fetch?: typeof fetch }).fetch;
@@ -162,7 +158,6 @@ export class SqlAgentClient {
     try {
       const headers: Record<string, string> = { Accept: "application/json" };
       if (body !== undefined) headers["Content-Type"] = "application/json";
-      if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
 
       let response: Response;
       try {

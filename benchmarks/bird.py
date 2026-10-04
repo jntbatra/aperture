@@ -47,7 +47,8 @@ from sqlagent.db.dialects import read_only_url  # noqa: E402
 from sqlagent.judge import Verdict, judge_answer, summarise_verdicts  # noqa: E402
 from sqlagent.llm.mantle import MantleClient  # noqa: E402
 from sqlagent.pipeline import SqlAgent  # noqa: E402
-from sqlagent.saas.plans import TIER_ORDER as TIERS  # noqa: E402
+
+TIERS = ("fast", "medium", "thorough")
 
 # The dataset is large (4 GB of SQLite files) and is not vendored into this
 # repository. Point --data at wherever it is unpacked.

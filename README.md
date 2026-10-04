@@ -154,7 +154,7 @@ top and work down.
 | 6 | [Running it](docs/06-operations.md) | Configuration, deployment, benchmarking, troubleshooting |
 | 7 | [Decisions and measurements](docs/07-decisions.md) | Every significant choice, what it cost, what it bought |
 | 8 | [Where the accuracy goes](docs/08-intent-design.md) | What `fast` really is, what the measurements rule out, and the one change the evidence points at |
-| — | [Aperture as a service](SAAS.md) | The five fronts, multi-tenancy, tiers, and what a hosted deployment needs |
+| — | [Aperture as a service](SAAS.md) | The hosted-product plan. Accounts, plans and auth were built and then removed (2026-10-04); the app now has no login |
 | — | [Tickets](TICKETS.md) | Every decision as a ticket with its real status: done, open, or won't-build with the reason |
 
 ---
@@ -201,15 +201,7 @@ sql-agent/
 │   ├── prompts.py           Every prompt, version-controlled
 │   ├── agent_graph.py       LangGraph state graph: nodes, edges, both repair loops
 │   ├── pipeline.py          SqlAgent public surface, the trace, the individual steps
-│   ├── cli.py               Terminal interface
-│   └── saas/                Who is asking, and whose data they may reach
-│       ├── tenancy.py           Tenant, ApiKey, Principal; keys stored hashed
-│       ├── passwords.py         scrypt — deliberately not the API-key hash
-│       ├── secrets.py           Fernet for tenant connection strings
-│       ├── connect.py           Prove a role cannot write, before saving it
-│       ├── plans.py             Tiers as data: limits, budgets, clamping
-│       ├── auth.py              One resolution path for all five fronts
-│       └── control.py           Accounts and entitlements, a separate database
+│   └── cli.py               Terminal interface
 ├── frontend/            React + TypeScript web interface
 │                        (schema graph drawn with React Flow)
 ├── benchmarks/

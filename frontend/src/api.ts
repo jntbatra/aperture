@@ -16,10 +16,9 @@
 /** Same origin by default.
  *
  *  The dev server proxies `/api` to the backend and production serves both
- *  from one domain, so the browser never makes a cross-origin request and the
- *  session cookie is always first-party. Pointing this at another origin
- *  brings back `SameSite` and CORS, and is only useful for a deployment that
- *  genuinely splits the two. */
+ *  from one domain, so the browser never makes a cross-origin request.
+ *  Pointing this at another origin brings back CORS, and is only useful for a
+ *  deployment that genuinely splits the two. */
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
 export interface AskResponse {
@@ -72,10 +71,6 @@ export interface HealthResponse {
   schema_version: string;
   light_model: string;
   strong_model: string;
-  /** Whether this deployment requires a tenant. Reported so "is this instance
-   *  open?" is answerable without reading a container's environment. */
-  auth_required: boolean;
-  encryption_configured: boolean;
 }
 
 export interface GraphNode {
@@ -239,9 +234,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   answering: 'Writing the answer',
 };
 
-/** Raised when the server refuses for a reason the UI must act on, rather than
- *  merely report. 401 means "sign in"; 402 means "you are out of allowance".
- *  A generic Error would make both of those a red toast. */
+/** An HTTP error from the API, carrying its status. */
 export class ApiError extends Error {
   /** Declared and assigned rather than a constructor parameter property: this
    *  project builds with `erasableSyntaxOnly`, which rejects the shorthand
@@ -253,25 +246,11 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.status = status;
   }
-
-  get needsAuth(): boolean {
-    return this.status === 401;
-  }
-
-  get outOfQuota(): boolean {
-    return this.status === 402;
-  }
 }
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
-    // The session is an httpOnly cookie on a different origin in development,
-    // so it is only sent when credentials are included. Without this the
-    // server issues a session, the browser stores it, and every subsequent
-    // request arrives unauthenticated — which looks exactly like a broken
-    // login and is nothing of the sort.
-    credentials: 'include',
     ...init,
   });
 
@@ -381,71 +360,6 @@ export interface DriftReport {
   rates: Record<string, [number, number]>;
   summary: string;
 }
-
-/** One pricing tier, as served by `GET /api/plans`.
- *
- *  `-1` means unlimited. The server sends the sentinel rather than the string
- *  "unlimited" so that every other consumer can still compare numbers. */
-export interface PlanInfo {
-  name: 'FREE' | 'PRO' | 'ENTERPRISE';
-  label: string;
-  price_monthly_usd: number;
-  price_monthly_inr: number;
-  /** True means "talk to us", not "free". Zero price means both in the table,
-   *  which is why this is a flag and not something to infer. */
-  custom_priced: boolean;
-  questions_per_month: number;
-  detailed_per_month: number;
-  max_quality_tier: 'fast' | 'medium' | 'thorough';
-  strong_model: boolean;
-  max_connected_databases: number;
-  max_uploaded_datasets: number;
-  max_seats: number;
-  row_limit: number;
-  history_retention_days: number;
-  features: string[];
-}
-
-export const getPlans = () => json<PlanInfo[]>('/api/plans');
-
-export interface Account {
-  tenant_id: string;
-  workspace: string;
-  email: string;
-  plan: string;
-  plan_label: string;
-}
-
-export interface UsageInfo {
-  period: string;
-  plan: string;
-  questions_used: number;
-  questions_limit: number;
-  detailed_used: number;
-  detailed_limit: number;
-  connected_databases: number;
-  connected_limit: number;
-}
-
-export const signUp = (email: string, password: string, workspace = '') =>
-  json<Account>('/api/auth/sign-up', {
-    method: 'POST',
-    body: JSON.stringify({ email, password, workspace }),
-  });
-
-export const signIn = (email: string, password: string) =>
-  json<Account>('/api/auth/sign-in', {
-    method: 'POST',
-    body: JSON.stringify({ email, password }),
-  });
-
-export const signOut = () => json<{ signed_out: boolean }>('/api/auth/sign-out', {
-  method: 'POST',
-});
-
-export const getAccount = () => json<Account>('/api/auth/me');
-
-export const getUsage = () => json<UsageInfo>('/api/usage');
 
 export const getDrift = (recent = 100, baseline = 300) =>
   json<DriftReport>(`/api/drift?recent=${recent}&baseline=${baseline}`);

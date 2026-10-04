@@ -91,7 +91,9 @@ transport or HTTP errors (`status` 0 means timeout / unreachable).
 ## Wiring rules for the OMS
 
 - **Do not expose the service to the internet.** It binds to `127.0.0.1`. Add an
-  authenticated backend route (admin/ops roles only) that calls the client; the
+  authenticated backend route (admin/ops roles only) that calls the client. The
+  service itself has no login — whoever can reach it can query — so the OMS's
+  own auth on that route is the only gate; the
   dashboard calls that route.
 - **Do not let the browser pick arbitrary options.** Accept only
   `{ question, tier, conversationId }` from the dashboard; the client sends
@@ -111,7 +113,7 @@ transport or HTTP errors (`status` 0 means timeout / unreachable).
 | | |
 |---|---|
 | `POST /api/ask` | `{ question, conversation_id?, options }` → answer. The client sends `options = { quality_tier: "fast", check_result_intent: <tier>, ambiguity_handling }`. |
-| `GET /api/health` | liveness, table count, models, whether auth is required |
+| `GET /api/health` | liveness, table count, models |
 
 ## Tests
 

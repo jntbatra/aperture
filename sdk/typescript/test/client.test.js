@@ -50,13 +50,13 @@ test("the response is mapped to camelCase with usage", async () => {
   assert.equal(a.usage.inputTokens, 2900);
 });
 
-test("conversation id, ambiguity and api key are sent", async () => {
+test("conversation id and ambiguity are sent", async () => {
   const { f, calls } = fakeFetch();
-  const client = new SqlAgentClient({ baseUrl: "http://x", apiKey: "ak_live_1", fetch: f });
+  const client = new SqlAgentClient({ baseUrl: "http://x", fetch: f });
   await client.ask("and for April?", { conversationId: "c1", ambiguity: "guess" });
   assert.equal(calls[0].body.conversation_id, "c1");
   assert.equal(calls[0].body.options.ambiguity_handling, "best_effort");
-  assert.equal(calls[0].init.headers.Authorization, "Bearer ak_live_1");
+  assert.equal(calls[0].init.headers.Authorization, undefined);
 });
 
 test("an HTTP error rejects with the status and the server's detail", async () => {

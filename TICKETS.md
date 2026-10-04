@@ -118,45 +118,20 @@ a large whitespace diff or drop the format check. Not decided.
 
 ## SaaS
 
+**Removed 2026-10-04.** Accounts, sign-in, sessions, API keys, tenants, plans,
+quotas, encrypted tenant credentials, and the marketing / pricing / checkout
+pages were all deleted. The app has no login: whoever can reach the server can
+use it, so it belongs on a private address. The code is in git history before
+this change. `SAAS.md` keeps the original plan.
+
 | # | Ticket | State |
 |---|---|---|
-| 53 | Tenant identity: `Tenant`, `Principal`, API keys | **done** — `saas/tenancy.py`, 38 tests |
-| 54 | Fail-closed auth on every front | **done** — `saas/auth.py`, `api/auth_routes.py`; the route-table test proved to bite |
-| 58 | Encrypted tenant database credentials | **done** — `saas/secrets.py`, 25 tests |
-| 59 | Plan tiers and quotas | **done** — `saas/plans.py`, 51 tests; enforced on both ask handlers |
-| 64 | Connect a tenant database, proving the role is read-only | **done** — verified against a real read-only *and* a real writable role |
-| 65 | Accounts, sessions, passwords | **done** — `saas/control.py`, `saas/passwords.py`; scrypt at 63ms |
-| 66 | Marketing, pricing, auth and checkout pages | **done** — verified in a browser |
-| 67 | `data/control.db` was committed to git | **done** — password hashes and live session tokens; never pushed, removed from history, `.gitignore` now matches `data/*.db` and `*.sqlite*` |
-| 55 | Per-tenant agent registry | **open** |
-| 56 | Tenant-scoped SQL and summary caches | **open** |
-| 57 | Tenant-scoped history store | **open** |
+| 53, 54, 58, 59, 64, 65, 66 | Tenancy, auth, credentials, plans, accounts, pages | **removed** |
+| 67 | `data/control.db` was committed to git | **done** — removed from history; the file is now unused |
+| 55, 56, 57, 62, 68, 69 | Per-tenant registry, caches, history; browser tokens; control-plane migrations; Razorpay | **dropped** — no tenants |
 | 60 | Python SDK | open |
-| 61 | TypeScript SDK, server and browser shapes | open |
-| 62 | Short-lived browser tokens | open — required before the browser SDK ships |
-| 63 | AWS deployment | open |
-| 68 | Control plane runs on SQLite with no migrations | open |
-| 69 | Razorpay | open — deliberately deferred; the page says so on its own surface |
-
-### 55, 56, 57 — why this cannot be hosted yet
-
-With two real tenants today, `get_agent()` returns **one** agent for the whole
-process, holding one `SqlCache` and one `SummaryCache` keyed without a tenant.
-Tenant B can be served SQL generated for tenant A's question, and the history
-table has no tenant column at all.
-
-Authentication is done and correct. The isolation behind it is not. These three
-come before the SDK and before AWS.
-
-### 68 — the control plane's own database
-
-`ControlStore` defaults to SQLite and creates its schema with
-`CREATE TABLE IF NOT EXISTS`, which cannot add a column to an existing table.
-Fine while the schema is new; fatal the first time it changes in production. A
-hosted deployment needs PostgreSQL — `SQLAGENT_CONTROL_DATABASE_URL` already
-takes one — and a real migration tool.
-
----
+| 61 | TypeScript SDK | **server-side client done** — `sdk/typescript`, cheap / expensive tiers |
+| 63 | AWS deployment | open — `deploy/EC2.md` |
 
 ## Accuracy
 

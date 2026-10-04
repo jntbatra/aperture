@@ -157,15 +157,7 @@ const FOLLOW_UPS = [
   'Why might that be?',
 ];
 
-type AppProps = {
-  /** Leave the console for the marketing pages. Optional so the component can
-   *  still be mounted on its own in a test or a storybook. */
-  onExit?: () => void;
-  account?: { workspace: string; plan_label: string };
-  onAccount?: () => void;
-};
-
-export default function App({ onExit, account, onAccount }: AppProps = {}) {
+export default function App() {
   const [question, setQuestion] = useState('');
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
@@ -369,19 +361,6 @@ export default function App({ onExit, account, onAccount }: AppProps = {}) {
           <button className="ghost-button" onClick={startNewThread} disabled={empty && !threadId}>
             New chat
           </button>
-          {onExit && (
-            <button className="ghost-button" onClick={onExit}>
-              Plans
-            </button>
-          )}
-          {account && onAccount && (
-            /* The workspace name is the thing that tells a user which account
-               they are in before they act — the one piece of state that is
-               dangerous to get wrong when someone has more than one. */
-            <button className="ghost-button" onClick={onAccount}>
-              {account.workspace}
-            </button>
-          )}
           <button
             className="ghost-button"
             aria-pressed={drawerOpen}

@@ -103,7 +103,9 @@ pm2 save
 ```
 
 `--host 127.0.0.1` is deliberate: only processes on this box can reach it. Do
-not open port 8000 in the security group.
+not open port 8000 in the security group. **The service has no login** — anyone
+who can reach the port can query the database (read-only) — so the private
+address and the backend route's own auth are the only gates.
 
 Point the backend at it with `SQL_AGENT_URL=http://127.0.0.1:8000`.
 
