@@ -99,7 +99,7 @@ def ask_database(question: str) -> dict[str, Any]:
     "list every customer" cannot flood the caller's context.
     """
     agent = get_agent()
-    result = agent.ask(question)
+    result = agent.ask(question, source="mcp")
 
     payload: dict[str, Any] = {
         "answer": result.answer,

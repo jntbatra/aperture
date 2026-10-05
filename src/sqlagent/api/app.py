@@ -695,7 +695,12 @@ async def ask(request: AskRequest) -> AskResponse:
     options = request.options.overrides() if request.options else None
 
     result = await run_in_threadpool(
-        agent.ask, request.question, history=history, options=options
+        agent.ask,
+        request.question,
+        history=history,
+        options=options,
+        session_id=conversation_id,
+        source="api",
     )
 
     await run_in_threadpool(_record, result, request.dataset_id, conversation_id)
@@ -893,6 +898,8 @@ async def ask_stream(
                 history=history,
                 options=parsed_options,
                 on_progress=on_progress,
+                session_id=thread_id,
+                source="web",
             )
             await run_in_threadpool(_record, result, dataset_id, thread_id)
             await queue.put(("result", to_response(result, thread_id).model_dump()))

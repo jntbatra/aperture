@@ -63,7 +63,9 @@ def ask(question: str, *, verbose: bool) -> int:
     engine = create_engine(config.database_url)
     agent = SqlAgent(engine, config=config)
 
-    result = agent.ask(question, on_progress=show_progress if verbose else None)
+    result = agent.ask(
+        question, on_progress=show_progress if verbose else None, source="cli"
+    )
 
     print()
     if result.sql:
@@ -164,7 +166,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
 
-    return ask(args.question, verbose=not args.quiet)
+    try:
+        return ask(args.question, verbose=not args.quiet)
+    finally:
+        # A one-shot process: send the trace before exiting.
+        from sqlagent import observability
+
+        observability.flush()
 
 
 if __name__ == "__main__":

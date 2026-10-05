@@ -39,6 +39,8 @@ dependencies = [
     # a clean install without them cannot serve at all.
     "pandas>=2.2.0",
     "openpyxl>=3.1.0",
+    # Tracing. Inert unless LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are set.
+    "langfuse>=4.16.0",
 ]
 
 [project.optional-dependencies]

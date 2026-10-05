@@ -72,9 +72,19 @@ class StubAgent:
         )
 
     def ask(
-        self, question: str, *, history=(), options=None, on_progress=None
+        self,
+        question: str,
+        *,
+        history=(),
+        options=None,
+        on_progress=None,
+        session_id=None,
+        source="library",
     ) -> AgentResult:
         self.seen_options = options
+        # What tracing would group this question under: the thread id.
+        self.seen_session_id = session_id
+        self.seen_source = source
         # Recorded so a test can assert the API loaded the thread's turns and
         # passed them down, which is the whole mechanism behind follow-ups.
         self.seen_history = list(history)
@@ -352,6 +362,18 @@ def test_the_first_question_in_a_thread_gets_no_history(client_and_agent):
     client.post("/api/ask", json={"question": "How many customers?"})
 
     assert stub.seen_history == []
+
+
+def test_a_question_is_traced_under_its_thread(client_and_agent):
+    """Langfuse sessions are conversation threads; the API must pass the id."""
+    client, stub = client_and_agent
+
+    thread = client.post("/api/ask", json={"question": "How many customers?"}).json()[
+        "conversation_id"
+    ]
+
+    assert stub.seen_session_id == thread
+    assert stub.seen_source == "api"
 
 
 def test_a_follow_up_receives_the_previous_turn(client_and_agent):

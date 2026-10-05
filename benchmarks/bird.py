@@ -206,7 +206,7 @@ def evaluate_one(
             )
 
         agent = SqlAgent(engine, client=client, config=config)
-        result = agent.ask(prompt_question)
+        result = agent.ask(prompt_question, source="benchmark")
 
         correct = False
         error = result.error
@@ -373,6 +373,11 @@ def main() -> int:
         "--prescreen", action="store_true", help="screen the question before acting"
     )
     parser.add_argument(
+        "--trace", action="store_true",
+        help="send traces to Langfuse (off by default: a 500-question run would "
+        "bury real traffic)",
+    )
+    parser.add_argument(
         "--glossary", type=Path, default=None,
         help="domain notes: units, terms and metrics the schema cannot express",
     )
@@ -470,6 +475,7 @@ def main() -> int:
         overrides["prescreen_input"] = True
     if args.glossary:
         overrides["glossary_path"] = str(args.glossary)
+    overrides["tracing_enabled"] = bool(args.trace)
     if args.no_cost_gate:
         overrides["max_plan_cost"] = 0
         overrides["max_plan_rows"] = 0

@@ -319,6 +319,51 @@ class SqlAgent:
         history: Sequence[Turn] = (),
         options: dict | None = None,
         on_progress: ProgressHook | None = None,
+        session_id: str | None = None,
+        source: str = "library",
+    ) -> AgentResult:
+        """Answer a question, traced to Langfuse when it is configured.
+
+        ``session_id`` groups the traces of one conversation (the API passes
+        the thread id); ``source`` says which front asked (``api``, ``cli``,
+        ``benchmark``…). Both only affect tracing. See ``_ask`` for the rest.
+        """
+        from sqlagent import observability
+
+        config = apply_overrides(self.config, options)
+        with observability.question_trace(
+            config, question, session_id=session_id, source=source
+        ) as root:
+            result = self._ask(
+                question, history=history, options=options, on_progress=on_progress
+            )
+            try:
+                trace = result.trace
+                root.update(
+                    output={"answer": result.answer, "sql": result.sql},
+                    level="ERROR" if result.error else "DEFAULT",
+                    status_message=result.error or None,
+                    metadata={
+                        "ok": result.ok,
+                        "row_count": result.result.row_count if result.result else None,
+                        "tables": list(trace.candidate_tables or trace.seed_tables),
+                        "model_calls": trace.model_calls,
+                        "repairs": trace.repair_count,
+                        "seconds": trace.seconds,
+                        "asked_for_clarification": bool(result.clarification_asks),
+                    },
+                )
+            except Exception:  # noqa: BLE001 - tracing must never change the answer
+                logger.exception("could not record the trace output")
+            return result
+
+    def _ask(
+        self,
+        question: str,
+        *,
+        history: Sequence[Turn] = (),
+        options: dict | None = None,
+        on_progress: ProgressHook | None = None,
     ) -> AgentResult:
         """Answer a question. Never raises; failures come back in the result.
 
@@ -555,15 +600,21 @@ class SqlAgent:
             # generated from a question the user has already been asked about —
             # interrogating them about wording they never wrote is absurd, and
             # would stall the run four times over.
-            answer = self.ask(
-                part,
-                history=done,
-                options={
-                    **options_of(config),
-                    "decompose_questions": False,
-                    "ambiguity_handling": "best_effort",
-                },
-            )
+            from sqlagent import observability
+
+            with observability.observation(
+                config, "answer-part", as_type="agent", input={"question": part}
+            ) as part_span:
+                answer = self._ask(
+                    part,
+                    history=done,
+                    options={
+                        **options_of(config),
+                        "decompose_questions": False,
+                        "ambiguity_handling": "best_effort",
+                    },
+                )
+                part_span.update(output={"answer": answer.answer, "sql": answer.sql})
 
             columns, carried = (
                 carryable_result(answer.result.columns, answer.result.rows)

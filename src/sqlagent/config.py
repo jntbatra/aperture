@@ -630,6 +630,16 @@ class Settings(BaseSettings):
     which reads exactly like an entitlement error and is not one.
     """
 
+    tracing_enabled: bool = True
+    """Send traces to Langfuse when its keys are set.
+
+    Needs ``LANGFUSE_PUBLIC_KEY`` and ``LANGFUSE_SECRET_KEY`` (and
+    ``LANGFUSE_BASE_URL`` for a region other than EU or a self-hosted server);
+    without them this does nothing. Set False to keep the keys in the
+    environment but stop tracing — the benchmark does, unless ``--trace``.
+    See ``observability.py``.
+    """
+
     llm_api_key: str = ""
     """Bearer token for ``llm_base_url``. Many local servers accept anything.
 

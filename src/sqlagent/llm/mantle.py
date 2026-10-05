@@ -51,6 +51,7 @@ from botocore.auth import SigV4Auth as BotocoreSigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.credentials import Credentials
 
+from sqlagent import observability
 from sqlagent.config import Settings, settings
 
 logger = logging.getLogger(__name__)
@@ -287,23 +288,58 @@ class MantleClient:
         if self._config.service_tier:
             payload["service_tier"] = self._config.service_tier
 
-        started = time.monotonic()
-        data = self._post("/chat/completions", payload)
-        elapsed = time.monotonic() - started
-
-        try:
-            text = data["choices"][0]["message"].get("content") or ""
-        except (KeyError, IndexError) as exc:
-            raise MantleError(f"Unexpected response shape from Mantle: {data}") from exc
-
-        usage = data.get("usage") or {}
-        completion = Completion(
-            text=text.strip(),
+        # One Langfuse generation per call, named after the graph step that made
+        # it. Messages go in OpenAI format so the UI renders them as a chat.
+        with observability.observation(
+            self._config,
+            observability.current_step(),
+            as_type="generation",
+            input=messages,
             model=model,
-            input_tokens=int(usage.get("prompt_tokens") or 0),
-            output_tokens=int(usage.get("completion_tokens") or 0),
-            seconds=round(elapsed, 3),
-        )
+            model_parameters={
+                "temperature": payload["temperature"],
+                "max_completion_tokens": payload["max_completion_tokens"],
+            },
+            metadata={"service_tier": self._config.service_tier or "standard"},
+        ) as generation:
+            started = time.monotonic()
+            data = self._post("/chat/completions", payload)
+            elapsed = time.monotonic() - started
+
+            try:
+                message = data["choices"][0]["message"]
+                text = message.get("content") or ""
+            except (KeyError, IndexError) as exc:
+                raise MantleError(
+                    f"Unexpected response shape from Mantle: {data}"
+                ) from exc
+
+            usage = data.get("usage") or {}
+            completion = Completion(
+                text=text.strip(),
+                model=model,
+                input_tokens=int(usage.get("prompt_tokens") or 0),
+                output_tokens=int(usage.get("completion_tokens") or 0),
+                seconds=round(elapsed, 3),
+            )
+
+            # Reasoning models put their thinking beside the answer. It is the
+            # record of *why* a query was written the way it was, so keep it.
+            thinking = message.get("reasoning_content") or message.get("reasoning")
+            output: dict[str, Any] = {"role": "assistant", "content": completion.text}
+            if thinking:
+                output["reasoning"] = thinking
+            generation.update(
+                output=observability.clip(output),
+                usage_details={
+                    "input": completion.input_tokens,
+                    "output": completion.output_tokens,
+                },
+                metadata={
+                    "seconds": completion.seconds,
+                    "finish_reason": data["choices"][0].get("finish_reason"),
+                },
+            )
 
         logger.debug(
             "mantle call model=%s in=%d out=%d %.2fs",

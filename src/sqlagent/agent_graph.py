@@ -68,6 +68,7 @@ from sqlagent.guards.validator import ValidationError, validate
 from sqlagent.intent import MAX_PREVIEW_CHARS, MAX_PREVIEW_ROWS
 from sqlagent.intent import check_intent as run_intent_check
 from sqlagent.llm.mantle import extract_sql
+from sqlagent.observability import traced_node
 
 # `Attempt` and `Trace` are imported at runtime rather than under
 # TYPE_CHECKING. LangGraph calls `get_type_hints()` on the state schema when
@@ -1195,17 +1196,26 @@ def build_agent_graph(agent: SqlAgent, config: Settings, emit):
     """
     builder = StateGraph(AgentState)
 
-    builder.add_node("screen", make_screen(agent, config, emit))
-    builder.add_node("check_cache", make_check_cache(agent, config, emit))
-    builder.add_node("select_tables", make_select_tables(agent, config, emit))
-    builder.add_node("build_context", make_build_context(agent, config, emit))
-    builder.add_node("generate_sql", make_generate_sql(agent, config, emit))
-    builder.add_node("criticise", make_criticise(agent, config, emit))
-    builder.add_node("validate_and_execute", make_validate_and_execute(agent, config, emit))
-    builder.add_node("check_intent", make_check_intent(agent, config, emit))
-    builder.add_node("widen_schema", make_widen_schema(agent, config, emit))
-    builder.add_node("write_answer", make_write_answer(agent, config, emit))
-    builder.add_node("give_up", make_give_up(agent, config, emit))
+    # Each node is one Langfuse observation: verb-first, stable names (they are
+    # what evaluators and dashboards key on) and the most specific type for
+    # what the step does. A no-op when tracing is off — see observability.py.
+    steps = [
+        ("screen", "screen-question", "guardrail", make_screen),
+        ("check_cache", "check-sql-cache", "retriever", make_check_cache),
+        ("select_tables", "select-tables", "retriever", make_select_tables),
+        ("build_context", "build-schema-context", "retriever", make_build_context),
+        ("generate_sql", "generate-sql", "chain", make_generate_sql),
+        ("criticise", "review-sql", "evaluator", make_criticise),
+        ("validate_and_execute", "execute-sql", "tool", make_validate_and_execute),
+        ("check_intent", "check-intent", "evaluator", make_check_intent),
+        ("widen_schema", "widen-schema", "retriever", make_widen_schema),
+        ("write_answer", "write-answer", "chain", make_write_answer),
+        ("give_up", "give-up", "span", make_give_up),
+    ]
+    for node, trace_name, kind, make in steps:
+        builder.add_node(
+            node, traced_node(config, trace_name, kind, make(agent, config, emit))
+        )
 
     builder.set_entry_point("screen")
 
