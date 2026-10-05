@@ -60,6 +60,9 @@ db-seed:  ## Load the example schema and sample data into the test database
 api:  ## Run the API server (http://localhost:8000)
 	$(CLEAN_ENV) $(PY) -m uvicorn sqlagent.api.app:app --reload --port 8000
 
+graph:  ## Draw the agent graph as Mermaid into docs/graph.md
+	$(CLEAN_ENV) $(PY) scripts/draw_graph.py
+
 web-install:  ## Install frontend dependencies
 	cd frontend && npm install
 
