@@ -117,6 +117,5 @@ cd /var/www/sql-agent && git pull && uv sync --no-dev && pm2 restart sql-agent
 
 ## What runs by default
 
-`cache_sql` on (identical questions reuse their SQL; the query still re-runs, so
-answers stay fresh), row cap 1,000, statement timeout 30s, read-only
-transaction, SQL validator, cost gate. See `docs/06-operations.md`.
+Row cap 1,000, statement timeout 30s, read-only transaction, SQL validator,
+cost gate. No SQL cache: every question is written fresh. See `docs/06-operations.md`.

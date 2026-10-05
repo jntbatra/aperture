@@ -110,7 +110,6 @@ class AskOptions(BaseModel):
     """After the query runs, ask whether the rows answer the question. One extra
     model call; +3.8pp with column docs on corrected BIRD (docs/10). This is what
     the SDK's ``expensive`` tier turns on."""
-    cache_sql: bool | None = None
 
     summarise_conversation: bool | None = None
     conversation_window: int | None = Field(default=None, ge=0, le=20)
@@ -442,17 +441,6 @@ TOGGLE_DESCRIPTIONS: list[ToggleInfo] = [
         kind="choice",
         choices=["2", "4", "8"],
         numeric=True,
-    ),
-    ToggleInfo(
-        name="cache_sql",
-        label="Reuse queries",
-        help=(
-            "An identical question reuses the SQL it produced before, skipping "
-            "generation. The query still runs against live data, so the answer "
-            "is current — only the writing of it is reused."
-        ),
-        cost="saves ~2 model calls on a repeat",
-        kind="switch",
     ),
 ]
 """What each toggle is, in the user's terms, with its cost stated.

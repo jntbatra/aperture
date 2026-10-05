@@ -82,7 +82,6 @@ def build(database, client, **overrides) -> SqlAgent:
         "database_url": "sqlite://",
         "full_schema_threshold": 15,
         "sample_rows": 0,
-        "cache_sql": False,
         "check_answer_faithfulness": False,
         "max_plan_cost": 0,
         "max_plan_rows": 0,
@@ -353,59 +352,22 @@ def test_a_clarification_turn_reads_as_pending_not_failed(database):
 
 
 # --------------------------------------------------------------------------
-# Caching
+# No SQL cache
 # --------------------------------------------------------------------------
 
 
-def test_an_identical_question_reuses_the_sql_but_re_runs_the_query(database):
-    """The statement is cached; the rows are not. The answer stays fresh."""
-    client = ScriptedClient("SELECT count(*) FROM customers", "There are 2 customers.")
-    agent = build(database, client, cache_sql=True)
-
-    first = agent.ask("How many customers?")
-    calls_after_first = client.calls
-
-    second = agent.ask("how many customers")  # same question, different casing
-
-    assert second.sql == first.sql
-    assert second.trace.cache_hit
-    # One further call — the answer. Generation was skipped.
-    assert client.calls == calls_after_first + 1
-    assert second.result.rows == first.result.rows
-
-
-def test_a_follow_up_is_never_served_from_the_cache(database):
-    """"And for April?" means whatever the previous turns made it mean."""
-    from sqlagent.conversation import Turn
-
-    client = ScriptedClient("SELECT count(*) FROM customers", "Two.")
-    agent = build(database, client, cache_sql=True)
+def test_an_identical_question_is_answered_from_scratch_every_time(database):
+    """The SQL cache was removed: every question is written fresh."""
+    client = ScriptedClient(
+        "SELECT count(*) FROM customers", "There are 2 customers.",
+        "SELECT count(*) FROM customers", "There are 2 customers.",
+    )
+    agent = build(database, client)
 
     agent.ask("How many customers?")
-    result = agent.ask(
-        "How many customers?", history=[Turn("something else", "SELECT 1")]
-    )
+    agent.ask("How many customers?")
 
-    assert not result.trace.cache_hit
-
-
-def test_a_cached_statement_that_fails_is_dropped(database):
-    """Serving it again would repeat the failure, and the repair path would keep
-    starting from a statement known to be broken."""
-    client = ScriptedClient("SELECT count(*) FROM customers", "There are 2 customers.")
-    agent = build(database, client, cache_sql=True)
-
-    key = agent.cache.key(
-        "How many customers?", schema_version=agent.snapshot.version, glossary=""
-    )
-    agent.cache.put(key, "SELECT count(*) FROM no_such_table")
-
-    result = agent.ask("How many customers?")
-
-    # The broken statement is gone, and the question was answered anyway by
-    # falling back to the full path.
-    assert agent.cache.get(key) != "SELECT count(*) FROM no_such_table"
-    assert result.ok
+    assert client.calls == 4
 
 
 # --------------------------------------------------------------------------

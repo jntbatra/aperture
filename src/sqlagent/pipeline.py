@@ -51,7 +51,6 @@ import networkx as nx
 from sqlalchemy import Engine
 
 from sqlagent import exemplars as exemplar_store
-from sqlagent.cache import SqlCache
 from sqlagent.config import (
     Settings,
     apply_overrides,
@@ -179,9 +178,6 @@ class Trace:
     the run reports zero asks and that reads as a finding about the model,
     when it is a setting."""
 
-    cache_hit: bool = False
-    """The SQL came from the cache; generation was skipped entirely."""
-
     answer_corrected: bool = False
     """The first answer said something the results did not support, and was
     regenerated. Worth counting: a rising rate means the answer model is drifting
@@ -247,21 +243,18 @@ class SqlAgent:
         self._snapshot: SchemaSnapshot | None = None
         self._graph: nx.DiGraph | None = None
 
-        # Domain facts the schema cannot carry — units, ambiguous terms, named
-        # metrics. Loaded once; an empty glossary renders to nothing, so a
-        # database with no declarations produces exactly the prompts it did
-        # before glossaries existed.
-        # Question -> SQL. Bounded, per-agent, and holding no result data;
-        # see `sqlagent.cache` for why the rows are deliberately not kept.
         self._column_docs: dict | None = None
         self._exemplars = None
-        self.cache = SqlCache(max_entries=self.config.cache_max_entries)
 
         # Standing context distilled from turns that have fallen out of the
         # window. In process and bounded: a summary is derived data, and losing
         # it costs one model call, so it does not belong in the store.
         self._summaries = SummaryCache()
 
+        # Domain facts the schema cannot carry — units, ambiguous terms, named
+        # metrics. Loaded once; an empty glossary renders to nothing, so a
+        # database with no declarations produces exactly the prompts it did
+        # before glossaries existed.
         self.glossary = Glossary.load(self.config.glossary_path)
         if self.glossary:
             logger.info(

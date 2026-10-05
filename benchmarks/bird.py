@@ -389,11 +389,6 @@ def main() -> int:
         "--no-faithfulness", action="store_true",
         help="skip checking the answer against the rows it describes",
     )
-    parser.add_argument(
-        "--cache", action="store_true",
-        help="reuse SQL across identical questions (off here: it would flatter a "
-             "benchmark that asks each question once)",
-    )
 
     parser.add_argument(
         "--judge", action="store_true",
@@ -422,10 +417,6 @@ def main() -> int:
     overrides: dict[str, object] = {
         "sample_rows": args.samples,
         "row_limit": args.row_limit,
-        # Off unless asked for. A cache would make a re-run of the same
-        # questions look faster and cheaper than the system actually is, and
-        # BIRD asks each question once anyway.
-        "cache_sql": args.cache,
         # The harness cannot answer a clarifying question, so it declares that
         # here rather than relying on a product default chosen for its
         # convenience. With `ask_human` — now the default for real users — every
@@ -504,7 +495,6 @@ def main() -> int:
             ("decompose", config.decompose_questions),
             ("prescreen", config.prescreen_input),
             (f"glossary={config.glossary_path}", bool(config.glossary_path)),
-            ("cache", config.cache_sql),
             ("cost-gate", config.max_plan_cost > 0),
             ("faithfulness", config.check_answer_faithfulness),
             (f"judge={config.judge_model or config.strong_model}", args.judge),
@@ -654,7 +644,7 @@ def report(
                             "vote_samples", "candidate_renderings",
                             "vote_temperature", "decompose_questions",
                             "prescreen_input", "ambiguity_handling",
-                            "glossary_path", "cache_sql",
+                            "glossary_path",
                             "max_plan_cost", "check_answer_faithfulness",
                             "check_inflated_aggregates", "sample_rows",
                             "full_schema_threshold", "initial_hops", "max_hops",

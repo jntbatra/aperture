@@ -156,12 +156,6 @@ class AgentState(TypedDict, total=False):
     clarification_asks: list[dict]
     """The same, structured: one entry per ambiguity, each with its options."""
 
-    # Caching
-    cache_key: str | None
-    """Set when this question is cacheable; None for follow-ups, which are not."""
-
-    from_cache: bool
-
     # Generation and execution
     sql: str
     validated_sql: str
@@ -218,11 +212,6 @@ def make_select_tables(agent: SqlAgent, config: Settings, emit):
                 # max_hops=0 yields exactly the seed set, so widening becomes a
                 # no-op and every downstream node works unchanged.
                 "neighbourhood": expand(agent.graph, seeds, max_hops=0),
-                # This node owns the recovery from a failed cache hit, so it is
-                # the node that clears the flag. Clearing it at the failure site
-                # would let the next failure fall through to widen_schema, which
-                # needs a neighbourhood a cache hit never built.
-                "from_cache": False,
             }
 
         emit("seeds", {"message": "Working out which tables are involved"})
@@ -234,7 +223,7 @@ def make_select_tables(agent: SqlAgent, config: Settings, emit):
             summary=state.get("history_summary", ""),
         )
         if not seeds:
-            return {"seeds": [], "error": "no_seed_tables", "from_cache": False}
+            return {"seeds": [], "error": "no_seed_tables"}
 
         trace.seed_tables = list(seeds)
         emit("schema", {"seed_tables": list(seeds)})
@@ -243,7 +232,6 @@ def make_select_tables(agent: SqlAgent, config: Settings, emit):
             "neighbourhood": expand(
                 agent.graph, seeds, max_hops=config.initial_hops
             ),
-            "from_cache": False,
         }
 
     return select_tables
@@ -314,54 +302,6 @@ def make_screen(agent: SqlAgent, config: Settings, emit):
         return {}
 
     return screen
-
-
-def make_check_cache(agent: SqlAgent, config: Settings, emit):
-    """Reuse the SQL a previous identical question produced.
-
-    Skips table selection, context building and generation — the two or three
-    model calls that dominate latency — and goes straight to validation and
-    execution. The query still runs against live data, so the answer is fresh;
-    only the *writing* of it is reused.
-
-    Follow-ups are never cached. "And for April?" means whatever the previous
-    turns made it mean, so a cache keyed on the question text alone would be
-    wrong across threads.
-    """
-
-    def check_cache(state: AgentState) -> dict[str, Any]:
-        if not config.cache_sql or state.get("history"):
-            return {"cache_key": None, "from_cache": False}
-
-        # No dataset in the key: each dataset gets its own SqlAgent instance,
-        # and the cache lives on the instance, so two datasets cannot share one.
-        key = agent.cache.key(
-            state["question"],
-            schema_version=agent.snapshot.version,
-            glossary=agent.glossary.render(),
-        )
-
-        cached = agent.cache.get(key)
-        if cached is None:
-            return {"cache_key": key, "from_cache": False}
-
-        emit("generating", {"message": "Reusing a query from an identical question"})
-        logger.info("cache hit for question")
-        state["trace"].cache_hit = True
-        return {
-            "cache_key": key,
-            "from_cache": True,
-            "sql": cached,
-            # No `tables`, and deliberately so. The allow-list is derived from
-            # retrieval, and a cached statement has no retrieval behind it. An
-            # *empty* allow-list would reject every table rather than permitting
-            # any, so validation runs with none at all and the database stays the
-            # authority on which tables exist. Every other guard — statement
-            # type, cost, read-only transaction — is unchanged.
-            "tables": [],
-        }
-
-    return check_cache
 
 
 def make_build_context(agent: SqlAgent, config: Settings, emit):
@@ -631,11 +571,6 @@ def make_criticise(agent: SqlAgent, config: Settings, emit):
         if not critic_enabled(config):
             return PASS
 
-        # A cached statement has already run successfully at least once. Paying
-        # a model call to re-review it would undo the point of the cache.
-        if state.get("from_cache"):
-            return PASS
-
         # The budget is shared with the repair loops. A query that has already
         # been rewritten three times is not going to be saved by a fourth
         # opinion, and the critic must not be able to exhaust the budget on its
@@ -702,9 +637,8 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
                 dialect=agent.dialect.sqlglot_name,
                 row_limit=config.row_limit,
                 # None, not an empty set. An empty allow-list means "no table is
-                # permitted" and would reject every cached statement; None means
-                # "no allow-list applies", which is the intent when there was no
-                # retrieval to derive one from.
+                # permitted"; None means "no allow-list applies", which is the
+                # intent when there was no retrieval to derive one from.
                 allowed_tables=set(tables) if tables else None,
             )
             # Ask the planner what this will cost before paying for it. A
@@ -728,7 +662,6 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
                 dialect=agent.dialect,
             )
         except ValidationError as exc:
-            _invalidate_if_cached(agent, state)
             trace.attempts.append(
                 Attempt(candidate_sql, False, str(exc), exc.kind, repaired_by)
             )
@@ -739,7 +672,6 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
                 "attempts": attempts + 1,
             }
         except CostRejected as exc:
-            _invalidate_if_cached(agent, state)
             # Loop A: the schema was fine, the query was not. The estimate goes
             # into the repair prompt, which is why the message names the number
             # and the ceiling rather than just saying "too expensive".
@@ -753,7 +685,6 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
                 "attempts": attempts + 1,
             }
         except ExecutionError as exc:
-            _invalidate_if_cached(agent, state)
             trace.attempts.append(
                 Attempt(validated.sql, False, str(exc), exc.kind, repaired_by)
             )
@@ -766,8 +697,7 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
 
         # An empty result caused by a literal the column does not contain is
         # the one failure here that is arithmetic rather than judgement, and
-        # it is repaired without a model call. Runs before the cache write, so
-        # a statement known to match nothing is never stored.
+        # it is repaired without a model call.
         final_sql = validated.sql
         if config.rebind_absent_literals and result.row_count == 0:
             repaired = _rebind_empty_result(agent, config, final_sql, trace)
@@ -775,13 +705,6 @@ def make_validate_and_execute(agent: SqlAgent, config: Settings, emit):
                 final_sql, result = repaired
 
         trace.attempts.append(Attempt(final_sql, True, repaired_by=repaired_by))
-
-        # Remember the statement, never the rows. The query re-runs on the next
-        # identical question, so the answer stays fresh; only the model calls
-        # that wrote it are skipped.
-        cache_key = state.get("cache_key")
-        if cache_key and config.cache_sql:
-            agent.cache.put(cache_key, final_sql)
 
         # Advisory, after the fact: a SUM multiplied by a join produces no
         # error and a plausible-looking number. Surfaced rather than rejected,
@@ -879,11 +802,6 @@ def make_check_intent(agent: SqlAgent, config: Settings, emit):
 
         result = state.get("result")
         if result is None:
-            return PASS
-
-        # A cached statement ran successfully before and was judged then.
-        # Re-judging it on every hit would undo the point of caching.
-        if state.get("from_cache"):
             return PASS
 
         if state.get("intent_repairs", 0) >= config.intent_repair_attempts:
@@ -1089,19 +1007,6 @@ def make_give_up(agent: SqlAgent, config: Settings, emit):
 # --------------------------------------------------------------------------
 
 
-def _invalidate_if_cached(agent: SqlAgent, state: AgentState) -> None:
-    """Drop a cached statement that just failed.
-
-    The schema may have drifted in a way the version hash has not caught, or the
-    query was always fragile. Serving it again would repeat the failure — and,
-    worse, the repair path would keep starting from a statement known to be
-    broken.
-    """
-    if state.get("from_cache") and state.get("cache_key"):
-        logger.info("cached SQL failed; dropping it from the cache")
-        agent.cache.invalidate(state["cache_key"])
-
-
 def make_route_after_critic(config: Settings):
     """A rejected query goes back to be rewritten; an accepted one runs."""
 
@@ -1119,12 +1024,7 @@ def route_after_screen(state: AgentState) -> str:
     """A refusal or a clarifying question ends the run before any database work."""
     if state.get("refused") or state.get("clarification"):
         return "give_up"
-    return "check_cache"
-
-
-def route_after_cache(state: AgentState) -> str:
-    """A hit goes straight to execution; a miss takes the normal path."""
-    return "validate_and_execute" if state.get("from_cache") else "select_tables"
+    return "select_tables"
 
 
 def route_after_select(state: AgentState) -> str:
@@ -1145,12 +1045,6 @@ def make_route_after_execute(config: Settings):
     def route_after_execute(state: AgentState) -> str:
         if state.get("last_error") is None:
             return "check_intent"
-
-        # A cached statement failed. It was validated with no allow-list and no
-        # retrieval behind it, so there is no context to repair *from* — start
-        # the normal path instead of regenerating against nothing.
-        if state.get("from_cache"):
-            return "select_tables"
 
         # Budget is shared across both loops. A question needing four attempts
         # is a question to hand back to the user, whichever kind each was.
@@ -1206,8 +1100,6 @@ def build_agent_graph(agent: SqlAgent, config: Settings, emit):
     # observation saying so on every question is noise.
     steps = [
         ("screen", "screen-question", "guardrail", make_screen, True, ("question",)),
-        ("check_cache", "check-sql-cache", "retriever", make_check_cache, True,
-         ("question",)),
         ("select_tables", "select-tables", "retriever", make_select_tables, True,
          ("question",)),
         ("build_context", "build-schema-context", "retriever", make_build_context, True,
@@ -1237,12 +1129,7 @@ def build_agent_graph(agent: SqlAgent, config: Settings, emit):
     builder.add_conditional_edges(
         "screen",
         route_after_screen,
-        {"check_cache": "check_cache", "give_up": "give_up"},
-    )
-    builder.add_conditional_edges(
-        "check_cache",
-        route_after_cache,
-        {"validate_and_execute": "validate_and_execute", "select_tables": "select_tables"},
+        {"select_tables": "select_tables", "give_up": "give_up"},
     )
     builder.add_conditional_edges(
         "select_tables",
@@ -1270,7 +1157,6 @@ def build_agent_graph(agent: SqlAgent, config: Settings, emit):
             "check_intent": "check_intent",
             "widen_schema": "widen_schema",
             "build_context": "build_context",   # Loop A
-            "select_tables": "select_tables",    # a cached statement failed
             "give_up": "give_up",
         },
     )

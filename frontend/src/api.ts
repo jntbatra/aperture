@@ -171,7 +171,6 @@ export interface AskOptions {
   prescreen_input?: boolean;
   ambiguity_handling?: 'best_effort' | 'ask_human';
   decompose_questions?: boolean;
-  cache_sql?: boolean;
   summarise_conversation?: boolean;
   conversation_window?: number;
   max_clarifying_questions?: number;

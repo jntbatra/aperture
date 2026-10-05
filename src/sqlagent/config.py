@@ -517,23 +517,6 @@ class Settings(BaseSettings):
     behaviour and their measured numbers are unchanged by this being on.
     """
 
-    cache_sql: bool = True
-    """Reuse the SQL an identical earlier question produced.
-
-    The *statement* is cached, never the rows: the query re-runs against live
-    data on every hit, so the answer stays current while the two or three model
-    calls that wrote it are skipped. Every guard still applies — a cached
-    statement is validated, cost-gated and executed read-only exactly like a
-    freshly generated one.
-
-    Follow-ups are never cached. "And for April?" means whatever the previous
-    turns made it mean.
-    """
-
-    cache_max_entries: int = 512
-    """Bound on the SQL cache. A few hundred questions is a generous working set
-    for one database, and each entry is a few hundred bytes."""
-
     stored_result_rows: int = 50
     """Result rows kept per turn, so reopening a conversation still shows its tables.
 
@@ -727,7 +710,6 @@ OVERRIDABLE = frozenset(
         "ambiguity_handling",
         "decompose_questions",
         "check_result_intent",
-        "cache_sql",
         "conversation_window",
         "summarise_conversation",
         "max_clarifying_questions",
