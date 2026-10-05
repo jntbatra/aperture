@@ -1199,23 +1199,38 @@ def build_agent_graph(agent: SqlAgent, config: Settings, emit):
     # Each node is one Langfuse observation: verb-first, stable names (they are
     # what evaluators and dashboards key on) and the most specific type for
     # what the step does. A no-op when tracing is off — see observability.py.
+    #
+    # The last field is the state the step reads, recorded as its input. A step
+    # switched off for this question (the critic, the intent check on the
+    # cheap tier) is left untraced: it passes straight through, and an
+    # observation saying so on every question is noise.
     steps = [
-        ("screen", "screen-question", "guardrail", make_screen),
-        ("check_cache", "check-sql-cache", "retriever", make_check_cache),
-        ("select_tables", "select-tables", "retriever", make_select_tables),
-        ("build_context", "build-schema-context", "retriever", make_build_context),
-        ("generate_sql", "generate-sql", "chain", make_generate_sql),
-        ("criticise", "review-sql", "evaluator", make_criticise),
-        ("validate_and_execute", "execute-sql", "tool", make_validate_and_execute),
-        ("check_intent", "check-intent", "evaluator", make_check_intent),
-        ("widen_schema", "widen-schema", "retriever", make_widen_schema),
-        ("write_answer", "write-answer", "chain", make_write_answer),
-        ("give_up", "give-up", "span", make_give_up),
+        ("screen", "screen-question", "guardrail", make_screen, True, ("question",)),
+        ("check_cache", "check-sql-cache", "retriever", make_check_cache, True,
+         ("question",)),
+        ("select_tables", "select-tables", "retriever", make_select_tables, True,
+         ("question",)),
+        ("build_context", "build-schema-context", "retriever", make_build_context, True,
+         ("neighbourhood",)),
+        ("generate_sql", "generate-sql", "chain", make_generate_sql, True,
+         ("question", "tables", "failed_sql", "last_error")),
+        ("criticise", "review-sql", "evaluator", make_criticise, critic_enabled(config),
+         ("question", "sql")),
+        ("validate_and_execute", "execute-sql", "tool", make_validate_and_execute, True,
+         ("sql",)),
+        ("check_intent", "check-intent", "evaluator", make_check_intent,
+         config.check_result_intent, ("question", "validated_sql", "result")),
+        ("widen_schema", "widen-schema", "retriever", make_widen_schema, True,
+         ("tables", "last_error")),
+        ("write_answer", "write-answer", "chain", make_write_answer, True,
+         ("question", "validated_sql", "result")),
+        ("give_up", "give-up", "span", make_give_up, True, ("question", "last_error")),
     ]
-    for node, trace_name, kind, make in steps:
-        builder.add_node(
-            node, traced_node(config, trace_name, kind, make(agent, config, emit))
-        )
+    for node, trace_name, kind, make, active, reads in steps:
+        fn = make(agent, config, emit)
+        if active:
+            fn = traced_node(config, trace_name, kind, fn, inputs=reads)
+        builder.add_node(node, fn)
 
     builder.set_entry_point("screen")
 

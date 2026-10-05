@@ -193,6 +193,16 @@ def test_a_question_becomes_one_trace_with_a_typed_step_per_node(exported, tmp_p
         assert spans[name].parent.span_id == root.context.span_id, name
         assert spans[name].context.trace_id == root.context.trace_id
 
+    # Each step records what it read, not the whole state.
+    for name in ("screen-question", "select-tables", "build-schema-context", "execute-sql"):
+        assert spans[name].attributes.get("langfuse.observation.input"), name
+    assert "SELECT email FROM customers" in spans["execute-sql"].attributes[
+        "langfuse.observation.input"
+    ]
+    # Switched-off steps are not traced at all.
+    assert "review-sql" not in spans and "check-intent" not in spans
+    assert "passed" in spans["screen-question"].attributes["langfuse.observation.output"]
+
     assert root.attributes.get("session.id") == "thread-1"
     assert "tier:cheap" in root.attributes.get("langfuse.trace.tags", ())
 

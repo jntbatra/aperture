@@ -250,14 +250,22 @@ def question_trace(
             attributes.__exit__(None, None, None)
 
 
-def traced_node(config: Settings, name: str, as_type: str, fn: Callable) -> Callable:
+def traced_node(
+    config: Settings,
+    name: str,
+    as_type: str,
+    fn: Callable,
+    *,
+    inputs: tuple[str, ...] = (),
+) -> Callable:
     """Wrap a graph node so each run is an observation of its own.
 
-    The node's *return value* becomes the output, summarised: it is the part
-    of the state the node changed, which is what a reader of the trace needs.
-    Inputs are left off — the incoming state is the whole conversation, the
-    trace object and every earlier result, and repeating it per step would make
-    every trace enormous without saying anything new.
+    Input is only the state keys the step actually reads (``inputs``): the
+    whole incoming state is the conversation, the trace object and every
+    earlier result, and repeating it per step would bury what matters. Output
+    is the node's return value — the part of the state it changed — with rows
+    replaced by their shape. A guardrail or evaluator that changed nothing
+    passed, and says so rather than showing ``{}``.
     """
     if not enabled(config):
         return fn
@@ -265,10 +273,16 @@ def traced_node(config: Settings, name: str, as_type: str, fn: Callable) -> Call
     def node(state: dict) -> dict:
         token = _current_step.set(name)
         try:
-            with observation(config, name, as_type=as_type) as span:
+            step_input = summarise_state(
+                {k: state.get(k) for k in inputs if state.get(k) not in (None, "", [])}
+            ) or None
+            with observation(config, name, as_type=as_type, input=step_input) as span:
                 update = fn(state)
                 try:
-                    span.update(output=summarise_state(update))
+                    output = summarise_state(update)
+                    if not output and as_type in ("guardrail", "evaluator"):
+                        output = {"verdict": "passed"}
+                    span.update(output=output or None)
                 except Exception:  # noqa: BLE001
                     logger.exception("could not record output for %s", name)
                 return update
@@ -315,6 +329,8 @@ def summarise_state(update: Any) -> Any:
                 "row_count": len(value.rows),
                 "truncated": bool(getattr(value, "truncated", False)),
             }
+        elif key == "failure_kind" and value is None:
+            continue  # "no failure" is the absence of one, not a field
         elif hasattr(value, "tables") and hasattr(value, "hops"):
             out[key] = {"tables": sorted(value.tables), "hops": value.hops}
         elif isinstance(value, str | int | float | bool | type(None)):
