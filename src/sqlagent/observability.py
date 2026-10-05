@@ -66,8 +66,14 @@ _current_step: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 MAX_TEXT = 4000
-"""Longest string kept in an observation's input or output. Schemas and
-prompts can run to tens of kilobytes; the head says what happened."""
+"""Longest string kept in a step's input or output. Schema text and state can
+run to tens of kilobytes; the head says what happened."""
+
+MAX_PROMPT_TEXT = 100_000
+"""Longest message kept on a generation. Much higher than ``MAX_TEXT``: the
+prompt is the record of exactly what the model was told, and a cut prompt
+cannot answer "why did it do that?" — an audit of a live trace found the
+glossary-dependent part of the prompt past the old 4,000-character cut."""
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +173,7 @@ def observation(
     metadata: Mapping[str, Any] | None = None,
     model: str | None = None,
     model_parameters: Mapping[str, Any] | None = None,
+    input_limit: int = MAX_TEXT,
 ) -> Iterator[Any]:
     """Open an observation as the current one; yields it (or a no-op).
 
@@ -180,7 +187,7 @@ def observation(
 
     kwargs: dict[str, Any] = {"name": name, "as_type": as_type}
     if input is not None:
-        kwargs["input"] = clip(input)
+        kwargs["input"] = clip(input, input_limit)
     if metadata:
         kwargs["metadata"] = dict(metadata)
     if model:
@@ -302,16 +309,16 @@ def current_step() -> str:
 # ---------------------------------------------------------------------------
 
 
-def clip(value: Any) -> Any:
-    """Shorten long strings, recursively, so one prompt cannot dominate a trace."""
+def clip(value: Any, limit: int = MAX_TEXT) -> Any:
+    """Shorten long strings, recursively, so one value cannot dominate a trace."""
     if isinstance(value, str):
-        if len(value) > MAX_TEXT:
-            return value[:MAX_TEXT] + f"… [{len(value) - MAX_TEXT} more characters]"
+        if len(value) > limit:
+            return value[:limit] + f"… [{len(value) - limit} more characters]"
         return value
     if isinstance(value, Mapping):
-        return {k: clip(v) for k, v in value.items()}
+        return {k: clip(v, limit) for k, v in value.items()}
     if isinstance(value, list | tuple):
-        return [clip(v) for v in value]
+        return [clip(v, limit) for v in value]
     return value
 
 

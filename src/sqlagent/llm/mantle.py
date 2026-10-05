@@ -295,6 +295,7 @@ class MantleClient:
             observability.current_step(),
             as_type="generation",
             input=messages,
+            input_limit=observability.MAX_PROMPT_TEXT,
             model=model,
             model_parameters={
                 "temperature": payload["temperature"],
@@ -330,7 +331,7 @@ class MantleClient:
             if thinking:
                 output["reasoning"] = thinking
             generation.update(
-                output=observability.clip(output),
+                output=observability.clip(output, observability.MAX_PROMPT_TEXT),
                 usage_details={
                     "input": completion.input_tokens,
                     "output": completion.output_tokens,

@@ -240,3 +240,9 @@ def test_a_model_call_is_a_generation_with_model_messages_and_tokens(exported, m
     usage = gen.attributes["langfuse.observation.usage_details"]
     assert '"input": 120' in usage and '"output": 7' in usage
     assert '"role": "system"' in gen.attributes["langfuse.observation.input"]
+
+
+def test_prompts_keep_far_more_text_than_step_state():
+    long = "x" * 20_000
+    assert observability.clip(long) != long
+    assert observability.clip(long, observability.MAX_PROMPT_TEXT) == long
