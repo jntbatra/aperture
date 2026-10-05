@@ -231,3 +231,14 @@ def test_the_example_glossary_parses_and_declares_the_paise_columns():
     # The other confirmed failure: a follow-up silently switched from
     # order_items to cart_items.
     assert "cart_items" in glossary.render()
+
+
+def test_a_configured_glossary_that_is_missing_is_an_error_not_a_whisper(tmp_path, caplog):
+    """A renamed file once dropped the paise note without a trace in the logs."""
+    import logging
+
+    with caplog.at_level(logging.ERROR, logger="sqlagent.glossary"):
+        glossary = Glossary.load(tmp_path / "renamed.json")
+
+    assert glossary == Glossary()
+    assert any("does not exist" in r.message for r in caplog.records)

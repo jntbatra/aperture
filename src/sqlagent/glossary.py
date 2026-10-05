@@ -206,16 +206,22 @@ class Glossary:
     def load(cls, path: str | Path | None) -> Glossary:
         """Read a glossary file, or return an empty one.
 
-        A missing file is not an error — most databases have no glossary, and
-        the agent works without one. A *malformed* file is logged loudly,
-        because someone wrote it intending it to take effect.
+        No path is not an error — most databases have no glossary, and the
+        agent works without one. A path that names a missing or malformed file
+        is logged as an error: someone configured it intending it to take
+        effect. A renamed glossary once failed silently here, and money was
+        reported 100x too large because the "stored in paise" note never
+        reached the model.
         """
         if not path:
             return cls()
 
         file = Path(path)
         if not file.exists():
-            logger.info("no glossary at %s", file)
+            logger.error(
+                "glossary %s is configured but does not exist; answering without it",
+                file,
+            )
             return cls()
 
         try:
