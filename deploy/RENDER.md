@@ -15,9 +15,11 @@ Nothing here has been run on Render yet. Treat each step as something to check.
 3. Render asks for every variable marked `sync: false`. Fill them from the table
    below. Nothing secret is stored in the repository.
 
-The service is on the `starter` plan because the persistent disk
-(`/var/data`, 1 GB: history, conversations and CSV/Excel datasets) needs a paid
-plan. A service with a disk cannot be scaled to more than one instance.
+The service is on the `free` plan: it sleeps when idle and has no persistent
+disk, so anything under `/var/data` (history, conversations, CSV/Excel
+datasets) is lost on restart. Accounts and approvals live in Neon Postgres and
+uploaded originals in Neon Object Storage, so those survive. To keep local
+state, move to a paid plan and add a disk back to `render.yaml`.
 
 ## 2. Environment
 
@@ -72,7 +74,7 @@ the agent and needs the database under analysis, so it is not used for routing.
 
 ## Known limits
 
-- One instance (disk attached), so a deploy has a short gap.
+- Free plan: cold start after idle, and local files do not survive a restart.
 - The MCP server (`mcp_server.py`) is not part of this service and has no
   authentication of its own. Do not expose it publicly as it is.
 - Restoring uploaded Postgres dumps needs `SQLAGENT_POSTGRES_ADMIN_URL`; leave

@@ -7,15 +7,11 @@ services:
     name: aperture
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter            # a persistent disk needs a paid plan
+    plan: free               # free: sleeps when idle, no persistent disk
     region: singapore        # next to the Neon project (aws-ap-southeast-1)
     branch: master
     autoDeployTrigger: checksPass
     healthCheckPath: /api/healthz
-    disk:
-      name: data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       # -- the database the agent answers questions about (read-only role) --
       - key: SQLAGENT_DATABASE_URL
