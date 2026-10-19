@@ -242,3 +242,18 @@ def snapshot() -> SchemaSnapshot:
 def graph(snapshot: SchemaSnapshot):
     """The schema graph built from the hand-built snapshot."""
     return build_graph(snapshot)
+
+
+@pytest.fixture(autouse=True)
+def open_api_for_unrelated_tests():
+    """Most API tests are about routing and shapes, not sign-in.
+
+    The global auth dependency is overridden to allow everything; the tests in
+    ``test_auth.py`` remove the override and exercise the real thing.
+    """
+    from sqlagent.api.app import app
+    from sqlagent.api.auth_routes import require_user
+
+    app.dependency_overrides[require_user] = lambda: None
+    yield
+    app.dependency_overrides.pop(require_user, None)

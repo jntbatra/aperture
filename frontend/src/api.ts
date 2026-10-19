@@ -510,3 +510,31 @@ export function askStreaming(
     source.close();
   };
 }
+
+// ---- Accounts ----------------------------------------------------------
+
+export interface Me {
+  email: string;
+}
+
+/** The signed-in user, or `null` when there is no valid session. */
+export async function getMe(): Promise<Me | null> {
+  try {
+    return await json<Me>('/api/auth/me');
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return null;
+    throw err;
+  }
+}
+
+/** Trade a Neon Auth token for the app's session cookie.
+ *
+ *  Resolves only for an approved user; a new or rejected one gets a 403 whose
+ *  message says which. */
+export const startSession = (neonToken: string) =>
+  json<Me>('/api/auth/session', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${neonToken}` },
+  });
+
+export const logout = () => json<{ ok: boolean }>('/api/auth/logout', { method: 'POST' });

@@ -61,14 +61,19 @@ from typing import Annotated, Any, Literal
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from sqlagent.api.auth_routes import require_user
+from sqlagent.api.auth_routes import router as auth_router
 from sqlagent.clarify import CLARIFICATION_ERROR
 from sqlagent.config import OVERRIDABLE, Settings, settings
 from sqlagent.conversation import Turn, carryable_result
 from sqlagent.ingest import IngestError, ingest_file
+from sqlagent.objectstore import ObjectStoreError, object_store
 from sqlagent.pipeline import AgentResult, SqlAgent
 from sqlagent.schema.graph import EDGE_FOREIGN_KEY
 from sqlagent.store import Store
@@ -610,6 +615,7 @@ app = FastAPI(
     description="Ask questions about a database in plain language.",
     version="0.1.0",
     lifespan=lifespan,
+    dependencies=[Depends(require_user)],
 )
 
 # The dev frontend runs on a different port, which makes every request
@@ -631,14 +637,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Sign-up, sign-in, sign-out, whoami and usage. Mounted after CORS so those
+# Session exchange, sign-out and the approval page. Mounted after CORS so those
 # routes get the same headers as everything else — a login that works in curl
 # and fails in a browser is the most confusing possible version of this bug.
+app.include_router(auth_router)
 
 
 # --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
+
+
+@app.get("/api/healthz")
+def liveness() -> dict[str, str]:
+    """Is the process up? Touches nothing else.
+
+    ``/api/health`` builds the agent, which needs the database under analysis;
+    a platform health check pointed at it would keep a perfectly good server
+    out of rotation whenever that database is down.
+    """
+    return {"status": "ok"}
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -666,9 +684,7 @@ def get_schema(agent: AgentDep) -> SchemaResponse:
         )
         for table in sorted(snapshot.tables.values(), key=lambda t: t.name)
     ]
-    return SchemaResponse(
-        version=snapshot.version, table_count=len(tables), tables=tables
-    )
+    return SchemaResponse(version=snapshot.version, table_count=len(tables), tables=tables)
 
 
 @app.post("/api/ask", response_model=AskResponse)
@@ -737,9 +753,7 @@ def _load_history(conversation_id: str | None) -> list[Turn]:
                 row_count=entry.row_count,
                 # A turn that asked something is owed a reply, and the next
                 # message is it. Without this the turn reads as a failure.
-                clarification=(
-                    entry.answer if entry.error == CLARIFICATION_ERROR else None
-                ),
+                clarification=(entry.answer if entry.error == CLARIFICATION_ERROR else None),
             )
             for entry in get_store().conversation_entries(conversation_id)
         ]
@@ -765,9 +779,7 @@ def _carried(preview: dict | None) -> dict:
     if preview.get("truncated"):
         return {"result_columns": (), "result_rows": ()}
 
-    columns, rows = carryable_result(
-        preview.get("columns", []), preview.get("rows", [])
-    )
+    columns, rows = carryable_result(preview.get("columns", []), preview.get("rows", []))
     return {"result_columns": columns, "result_rows": rows}
 
 
@@ -858,13 +870,9 @@ async def ask_stream(
         raise HTTPException(status_code=400, detail="question must not be empty")
 
     try:
-        parsed_options = (
-            AskOptions.model_validate_json(options).overrides() if options else None
-        )
+        parsed_options = AskOptions.model_validate_json(options).overrides() if options else None
     except Exception as exc:  # noqa: BLE001 - a bad query string is a 400, not a 500
-        raise HTTPException(
-            status_code=400, detail=f"invalid options: {exc}"
-        ) from exc
+        raise HTTPException(status_code=400, detail=f"invalid options: {exc}") from exc
 
     agent = await run_in_threadpool(resolve_agent, dataset_id)
     thread_id = await run_in_threadpool(_ensure_conversation, conversation_id, dataset_id)
@@ -994,9 +1002,7 @@ def schema_graph(
 
 
 @app.post("/api/datasets", response_model=DatasetResponse)
-async def upload_dataset(
-    file: Annotated[UploadFile, File()]
-) -> DatasetResponse:
+async def upload_dataset(file: Annotated[UploadFile, File()]) -> DatasetResponse:
     """Upload a CSV, Excel workbook or PostgreSQL dump and make it queryable.
 
     The file is streamed to a temporary path first: reading a 500 MB upload
@@ -1019,6 +1025,18 @@ async def upload_dataset(
         )
     except IngestError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        # Keep the original upload in object storage, when one is configured.
+        # Done before the dataset is recorded so a failure leaves no dataset
+        # that claims to be backed up and is not.
+        store = object_store(config)
+        if store is not None:
+            await run_in_threadpool(store.put, dataset.id, original, temporary)
+    except ObjectStoreError as exc:
+        if dataset.database_url.startswith("sqlite:///"):
+            Path(dataset.database_url.removeprefix("sqlite:///")).unlink(missing_ok=True)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -1030,18 +1048,29 @@ async def upload_dataset(
 def list_datasets() -> list[DatasetResponse]:
     return [
         DatasetResponse(
-            id=d["id"], name=d["name"], kind=d["kind"], tables=d["tables"],
-            row_counts=d["row_counts"], created_at=d["created_at"], note=d["note"] or "",
+            id=d["id"],
+            name=d["name"],
+            kind=d["kind"],
+            tables=d["tables"],
+            row_counts=d["row_counts"],
+            created_at=d["created_at"],
+            note=d["note"] or "",
         )
         for d in get_store().list_datasets()
     ]
 
 
 @app.delete("/api/datasets/{dataset_id}")
-def delete_dataset(dataset_id: str) -> dict:
+async def delete_dataset(dataset_id: str) -> dict:
     if not get_store().delete_dataset(dataset_id):
         raise HTTPException(status_code=404, detail=f"No dataset '{dataset_id}'")
     get_dataset_agent.cache_clear()
+    store = object_store(settings())
+    if store is not None:
+        try:
+            await run_in_threadpool(store.delete_dataset, dataset_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("could not remove stored files for dataset %s", dataset_id)
     return {"deleted": dataset_id}
 
 
@@ -1055,8 +1084,7 @@ def delete_dataset(dataset_id: str) -> dict:
 
 
 @app.get("/api/conversations", response_model=list[ConversationSummary])
-def list_conversations( limit: Annotated[int, Query(ge=1, le=200)] = 50
-) -> list[dict]:
+def list_conversations(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[dict]:
     """Threads, most recently used first."""
     return get_store().list_conversations(limit=limit)
 
@@ -1261,3 +1289,34 @@ def _layout(graph) -> dict:
     except (ImportError, ModuleNotFoundError):
         logger.debug("NumPy absent; falling back to a circular layout")
         return nx.circular_layout(undirected)
+
+
+# --------------------------------------------------------------------------
+# The built frontend
+#
+# In production one process serves both, so the browser sees a single origin
+# and the session cookie needs no cross-site tricks. Registered last so every
+# /api route above wins; an unknown /api path stays a 404 rather than quietly
+# returning the page.
+# --------------------------------------------------------------------------
+
+
+class SpaFiles(StaticFiles):
+    """Static files that fall back to ``index.html`` for client-side routes."""
+
+    async def get_response(self, path: str, scope):  # type: ignore[no-untyped-def]
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or path.startswith("api/"):
+                raise
+            return await super().get_response("index.html", scope)
+
+
+def mount_frontend(target: FastAPI, directory: str) -> None:
+    """Serve a built frontend from ``directory`` on ``target``."""
+    target.mount("/", SpaFiles(directory=directory, html=True), name="web")
+
+
+if settings().static_dir and Path(settings().static_dir).is_dir():
+    mount_frontend(app, settings().static_dir)

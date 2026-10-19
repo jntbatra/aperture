@@ -33,6 +33,8 @@ dependencies = [
     # HTTP client for the model endpoint, and the web API.
     "httpx>=0.28.0",
     "boto3>=1.35.0",
+    # Verifies the Neon Auth JWT (EdDSA needs the crypto extra).
+    "pyjwt[crypto]>=2.9.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     # CSV / Excel upload (sqlagent.ingest). Imported by the API at startup, so
@@ -41,6 +43,9 @@ dependencies = [
     "openpyxl>=3.1.0",
     # Tracing. Inert unless LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY are set.
     "langfuse>=4.16.0",
+    "langchain>=1.4.3",
+    "langchain-openai>=1.6.7",
+    "langgraph-checkpoint-sqlite>=3.1.1",
 ]
 
 [project.optional-dependencies]

@@ -25,7 +25,7 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +37,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # ----------------------------------------------------------------
@@ -572,6 +573,75 @@ class Settings(BaseSettings):
     impolite and, given the read-only role, impossible.
     """
 
+    # ----------------------------------------------------------------
+    # Accounts
+    # ----------------------------------------------------------------
+
+    control_database_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("SQLAGENT_CONTROL_DATABASE_URL", "DATABASE_URL"),
+    )
+    """Where approvals and sessions live — the Neon ``DATABASE_URL``.
+
+    Kept apart from the database under analysis, which is read-only and belongs
+    to someone else. Empty falls back to a SQLite file under ``data_dir``, which
+    is fine for a laptop and wrong for anything with more than one instance.
+    """
+
+    neon_auth_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("SQLAGENT_NEON_AUTH_BASE_URL", "NEON_AUTH_BASE_URL"),
+    )
+    neon_auth_jwks_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("SQLAGENT_NEON_AUTH_JWKS_URL", "NEON_AUTH_JWKS_URL"),
+    )
+    """Neon Auth identifies people; this app only decides whether to let them in.
+    Both are written to ``.env`` by ``neon deploy``. Empty means nobody can
+    sign in, which is the safe failure."""
+
+    object_store_bucket: str = "assets"
+    object_store_endpoint: str = Field(
+        default="",
+        validation_alias=AliasChoices("SQLAGENT_S3_ENDPOINT", "AWS_ENDPOINT_URL_S3"),
+    )
+    object_store_region: str = Field(
+        default="",
+        validation_alias=AliasChoices("SQLAGENT_S3_REGION", "AWS_REGION"),
+    )
+    object_store_access_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("SQLAGENT_S3_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"),
+    )
+    object_store_secret_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("SQLAGENT_S3_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY"),
+    )
+    """Neon Object Storage (S3-compatible). Uploaded files are kept here when an
+    endpoint is configured, and only on local disk otherwise."""
+
+    static_dir: str = ""
+    """A built frontend to serve from this process. Empty in development, where
+    Vite serves it; set in the container image."""
+
+    admin_email: str = ""
+    """Who is asked to approve each sign-up. Empty means nobody can be asked,
+    so every sign-up stays pending and the approval link is only logged."""
+
+    public_url: str = "http://localhost:5173"
+    """The address people reach the site at. Approval links are built from it."""
+
+    session_days: int = 14
+    cookie_secure: bool = False
+    """Mark the session cookie ``Secure``. Must be true behind HTTPS."""
+
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    """Outgoing mail for approval requests. Amazon SES SMTP works unchanged."""
+
     postgres_admin_url: str = ""
     """A PostgreSQL URL with permission to CREATE DATABASE.
 
@@ -738,9 +808,7 @@ def apply_overrides(config: Settings, overrides: dict | None) -> Settings:
         return config
 
     permitted = {
-        key: value
-        for key, value in overrides.items()
-        if key in OVERRIDABLE and value is not None
+        key: value for key, value in overrides.items() if key in OVERRIDABLE and value is not None
     }
     if not permitted:
         return config

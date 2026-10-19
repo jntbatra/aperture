@@ -1,0 +1,78 @@
+# Render Blueprint: one Docker web service (API + built frontend).
+# Render rebuilds and redeploys on pushes to `branch`, once GitHub checks pass.
+# Values marked `sync: false` are secrets: Render asks for them when the
+# Blueprint is first created, and they are never stored in this repository.
+services:
+  - type: web
+    name: aperture
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # a persistent disk needs a paid plan
+    region: singapore        # next to the Neon project (aws-ap-southeast-1)
+    branch: master
+    autoDeployTrigger: checksPass
+    healthCheckPath: /api/healthz
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      # -- the database the agent answers questions about (read-only role) --
+      - key: SQLAGENT_DATABASE_URL
+        sync: false
+      - key: SQLAGENT_GLOSSARY_PATH
+        value: glossaries/example.json
+
+      # -- model access: Bedrock Mantle, signed from a dedicated IAM user --
+      - key: SQLAGENT_MANTLE_REGION
+        value: us-east-1
+      - key: SQLAGENT_LLM_BASE_URL
+        sync: false
+      - key: SQLAGENT_LLM_AUTH
+        value: bedrock_token
+      - key: SQLAGENT_LIGHT_MODEL
+        value: google.gemma-4-31b
+      - key: SQLAGENT_STRONG_MODEL
+        value: google.gemma-4-31b
+      # These two names are the AWS default credential chain, which Bedrock
+      # uses. They are NOT Neon's storage keys (see SQLAGENT_S3_* below).
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+
+      # -- Neon: accounts and approvals --
+      - key: DATABASE_URL
+        sync: false
+      - key: NEON_AUTH_BASE_URL
+        sync: false
+      - key: NEON_AUTH_JWKS_URL
+        sync: false
+
+      # -- Neon Object Storage: uploaded files --
+      - key: SQLAGENT_S3_ENDPOINT
+        sync: false
+      - key: SQLAGENT_S3_REGION
+        value: ap-southeast-1
+      - key: SQLAGENT_S3_ACCESS_KEY_ID
+        sync: false
+      - key: SQLAGENT_S3_SECRET_ACCESS_KEY
+        sync: false
+
+      # -- who approves sign-ups, and how they are told --
+      - key: SQLAGENT_ADMIN_EMAIL
+        sync: false
+      - key: SQLAGENT_PUBLIC_URL
+        sync: false          # https://<your domain>
+      - key: SQLAGENT_COOKIE_SECURE
+        value: "true"
+      - key: SQLAGENT_SMTP_HOST
+        sync: false
+      - key: SQLAGENT_SMTP_USER
+        sync: false
+      - key: SQLAGENT_SMTP_PASSWORD
+        sync: false
+      - key: SQLAGENT_SMTP_FROM
+        sync: false
