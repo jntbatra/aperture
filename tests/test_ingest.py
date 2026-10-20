@@ -173,12 +173,14 @@ def test_malformed_csv_is_refused_not_crashed(tmp_path):
         ingest_file(source, data_dir=tmp_path / "data")
 
 
-def test_dump_without_a_server_is_refused_clearly(tmp_path):
+def test_dump_without_a_server_is_converted_to_sqlite(tmp_path):
     source = tmp_path / "backup.sql"
-    source.write_text("CREATE TABLE t (id int);")
+    source.write_text("CREATE TABLE t (id int);\n")
 
-    with pytest.raises(IngestError, match="needs a server"):
-        ingest_file(source, data_dir=tmp_path / "data", postgres_admin_url=None)
+    dataset = ingest_file(source, data_dir=tmp_path / "data", postgres_admin_url=None)
+
+    assert dataset.database_url.startswith("sqlite:///")
+    assert dataset.tables == ["t"]
 
 
 # --------------------------------------------------------------------------

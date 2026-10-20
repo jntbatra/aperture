@@ -49,6 +49,8 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import create_engine, text
 
+from sqlagent import pgdump
+
 logger = logging.getLogger(__name__)
 
 CSV_SUFFIXES = {".csv", ".tsv", ".txt"}
@@ -180,12 +182,9 @@ def ingest_file(
     if suffix in EXCEL_SUFFIXES:
         return _ingest_tabular(source, name, dataset_id, data_dir, kind="excel")
     if suffix in DUMP_SUFFIXES:
-        if not postgres_admin_url:
-            raise IngestError(
-                "A PostgreSQL dump needs a server to restore into. "
-                "Set SQLAGENT_POSTGRES_ADMIN_URL."
-            )
-        return _ingest_dump(source, name, dataset_id, postgres_admin_url)
+        if postgres_admin_url:
+            return _ingest_dump(source, name, dataset_id, postgres_admin_url)
+        return _ingest_dump_as_sqlite(source, name, dataset_id, data_dir)
 
     raise IngestError(
         f"Unsupported file type '{suffix}'. "
@@ -243,6 +242,34 @@ def _ingest_tabular(
         row_counts=row_counts,
         created_at=datetime.now(UTC).isoformat(timespec="seconds"),
         note=note,
+    )
+
+
+def _ingest_dump_as_sqlite(source: Path, name: str, dataset_id: str, data_dir: Path) -> Dataset:
+    """No PostgreSQL server configured: convert a plain-SQL dump to SQLite."""
+    if source.read_bytes()[:5].startswith(b"PGDMP"):
+        raise IngestError(
+            "This is a custom-format dump, which needs a PostgreSQL server to restore. "
+            "Export it as plain SQL instead: pg_dump --format=plain."
+        )
+    target = data_dir / f"{dataset_id}.sqlite"
+    try:
+        counts = pgdump.convert(source, target)
+    except pgdump.DumpError as exc:
+        raise IngestError(str(exc)) from exc
+    return Dataset(
+        id=dataset_id,
+        name=name,
+        kind="pg_dump",
+        database_url=f"sqlite:///{target}",
+        tables=sorted(counts),
+        row_counts=counts,
+        created_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        note=(
+            f"Converted {len(counts)} tables to SQLite. Tables, rows, primary keys and "
+            "foreign keys were kept; views, functions, indexes and enums were not, and "
+            "types were mapped to the nearest SQLite type."
+        ),
     )
 
 
