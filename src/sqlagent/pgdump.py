@@ -107,6 +107,8 @@ def _statements(path: Path, *, rows: bool) -> Iterator[tuple[str, object]]:
                         yield [_unescape(field) for field in data.rstrip("\n").split("\t")]
 
             yield "copy", (_name(match["table"]), _names(match["cols"]), body())
+        if buffer:
+            yield "stmt", "".join(buffer).strip()
 
 
 def _unescape(field: str) -> str | None:
@@ -185,6 +187,7 @@ def convert(source: Path, target: Path) -> dict[str, int]:
     file holds no tables.
     """
     tables: dict[str, _Table] = {}
+    saw_query = False
     for kind, item in _statements(source, rows=False):
         if kind == "copy":
             for _ in item[2]:  # type: ignore[index]
@@ -192,6 +195,7 @@ def convert(source: Path, target: Path) -> dict[str, int]:
             continue
         statement = str(item)
         head = statement[:30].upper()
+        saw_query = saw_query or head.startswith(("SELECT", "WITH"))
         if head.startswith("CREATE TABLE"):
             if (table := _parse_create(statement)) is not None:
                 tables[table.name] = table
@@ -206,6 +210,11 @@ def convert(source: Path, target: Path) -> dict[str, int]:
                     (_names(m["cols"]), _name(m["ref"]), _names(m["refcols"]))
                 )
 
+    if not tables and saw_query:
+        raise DumpError(
+            "This file holds a SQL query, not a database dump: it has no tables or rows. "
+            "Upload the data itself (a CSV, an Excel file, or a pg_dump in plain SQL)."
+        )
     if not tables:
         raise DumpError(
             "No CREATE TABLE statements found. Upload a plain-SQL dump "

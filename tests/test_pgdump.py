@@ -91,7 +91,7 @@ def test_keys_survive_so_the_schema_graph_can_join(tmp_path):
 
 def test_a_file_with_no_tables_is_refused(tmp_path):
     with pytest.raises(IngestError, match="No CREATE TABLE"):
-        _load(tmp_path, "SELECT 1;\n")
+        _load(tmp_path, "-- nothing here\nSET x = 1;\n")
 
 
 def test_custom_format_dump_is_refused_with_advice(tmp_path):
@@ -99,3 +99,8 @@ def test_custom_format_dump_is_refused_with_advice(tmp_path):
     dump.write_bytes(b"PGDMP" + b"\x00" * 20)
     with pytest.raises(IngestError, match="plain SQL"):
         ingest_file(dump, data_dir=tmp_path / "data", original_name="x.dump")
+
+
+def test_a_saved_query_is_named_as_such(tmp_path):
+    with pytest.raises(IngestError, match="holds a SQL query"):
+        _load(tmp_path, "-- ascending\n\nSELECT id FROM items LIMIT 1000\n;\n")
