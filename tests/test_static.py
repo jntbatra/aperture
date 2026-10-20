@@ -44,3 +44,20 @@ def test_liveness_needs_no_login_and_no_database():
 
     with TestClient(app) as test_client:
         assert test_client.get("/api/healthz").json() == {"status": "ok"}
+
+
+def test_health_reports_no_database_instead_of_failing(monkeypatch):
+    """With no configured database the server is up: say so, do not 500."""
+    from fastapi.testclient import TestClient
+
+    from sqlagent.api import app as api
+
+    def unavailable():
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(api, "get_agent", unavailable)
+    client = TestClient(api.app)
+    body = client.get("/api/health").json()
+    assert body["status"] == "no_database"
+    assert body["tables"] == 0
+    assert client.get("/api/schema").status_code == 503

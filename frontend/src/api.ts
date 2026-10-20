@@ -271,9 +271,14 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export const getHealth = () => json<HealthResponse>('/api/health');
+const withDataset = (path: string, datasetId?: string | null) =>
+  datasetId ? `${path}?dataset_id=${encodeURIComponent(datasetId)}` : path;
 
-export const getSchema = () => json<SchemaResponse>('/api/schema');
+export const getHealth = (datasetId?: string | null) =>
+  json<HealthResponse>(withDataset('/api/health', datasetId));
+
+export const getSchema = (datasetId?: string | null) =>
+  json<SchemaResponse>(withDataset('/api/schema', datasetId));
 
 export const ask = (
   question: string,
@@ -382,8 +387,8 @@ export const DRIFT_LABELS: Record<string, string> = {
  *  answerable and useless — "How many rows are in kitchen_profiles?" is a fact
  *  about storage, not a question anybody has. Returns an empty list if the
  *  model call failed, and the caller falls back. */
-export const getSuggestions = () =>
-  json<{ questions: string[] }>('/api/suggestions');
+export const getSuggestions = (datasetId?: string | null) =>
+  json<{ questions: string[] }>(withDataset('/api/suggestions', datasetId));
 
 /** The toggles, their server defaults and what each costs.
  *

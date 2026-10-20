@@ -198,14 +198,16 @@ export default function App({
   const cancelRef = useRef<(() => void) | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Refetched when the dataset changes: health, schema and suggestions all
+  // describe whichever database the next question will run against.
   useEffect(() => {
-    getHealth().then(setHealth).catch(() => setHealth(null));
-    getSchema().then(setSchema).catch(() => setSchema(null));
+    getHealth(datasetId).then(setHealth).catch(() => setHealth(null));
+    getSchema(datasetId).then(setSchema).catch(() => setSchema(null));
     // null keeps the schema-derived fallback in play until this resolves.
-    getSuggestions()
+    getSuggestions(datasetId)
       .then((payload) => setSuggested(payload.questions))
       .catch(() => setSuggested([]));
-  }, []);
+  }, [datasetId]);
 
   // Restore the thread that was open when the page was last closed. A
   // conversation that evaporates on refresh is not a conversation.
@@ -327,10 +329,14 @@ export default function App({
         <div className="header__meta">
           <span>
             <span
-              className={`header__dot ${health ? '' : 'header__dot--down'}`}
+              className={`header__dot ${health?.status === 'ok' ? '' : 'header__dot--down'}`}
               aria-hidden="true"
             />
-            {health ? `${health.tables} tables` : 'offline'}
+            {!health
+              ? 'offline'
+              : health.status === 'no_database'
+                ? 'no data yet: upload a file'
+                : `${health.tables} tables`}
           </span>
           {health && <span>{health.light_model}</span>}
           {datasetId && (
@@ -472,7 +478,6 @@ export default function App({
             // and carrying its turns forward would feed the model SQL against
             // tables that no longer exist.
             startNewThread();
-            getSchema().then(setSchema).catch(() => setSchema(null));
           }}
         />
       )}

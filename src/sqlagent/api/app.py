@@ -584,7 +584,18 @@ def get_dataset_agent(dataset_id: str) -> SqlAgent:
 
 
 def resolve_agent(dataset_id: str | None) -> SqlAgent:
-    return get_dataset_agent(dataset_id) if dataset_id else get_agent()
+    if dataset_id:
+        return get_dataset_agent(dataset_id)
+    try:
+        return get_agent()
+    except Exception as exc:  # noqa: BLE001
+        # No configured database (or it is down): say so plainly, so the UI can
+        # point the user at uploading a file instead of showing a bare 500.
+        logger.warning("configured database unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="No database is connected. Upload a CSV, Excel or SQL file to start.",
+        ) from exc
 
 
 @asynccontextmanager
@@ -607,7 +618,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # `Annotated[X, Depends(f)]` is the current FastAPI idiom for injection: it
 # keeps the dependency in the type rather than in a mutable default argument,
 # which is both clearer and avoids the classic Python default-argument trap.
-AgentDep = Annotated[SqlAgent, Depends(get_agent)]
+def current_agent(dataset_id: Annotated[str | None, Query()] = None) -> SqlAgent:
+    """The agent for ``?dataset_id=`` if given, else the configured database."""
+    return resolve_agent(dataset_id)
+
+
+AgentDep = Annotated[SqlAgent, Depends(current_agent)]
 
 
 app = FastAPI(
@@ -660,8 +676,21 @@ def liveness() -> dict[str, str]:
 
 
 @app.get("/api/health", response_model=HealthResponse)
-def health(agent: AgentDep) -> HealthResponse:
+def health(dataset_id: Annotated[str | None, Query()] = None) -> HealthResponse:
     config = settings()
+    try:
+        agent = resolve_agent(dataset_id)
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        # The server is up and models are configured; only the data is missing.
+        return HealthResponse(
+            status="no_database",
+            tables=0,
+            schema_version="",
+            light_model=config.light_model,
+            strong_model=config.strong_model,
+        )
     return HealthResponse(
         status="ok",
         tables=len(agent.snapshot),
