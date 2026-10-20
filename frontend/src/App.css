@@ -13,6 +13,40 @@
   flex-direction: column;
 }
 
+.body {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+}
+
+.body > .main {
+  min-width: 0;
+}
+
+/* The chat history, always open beside the conversation. */
+.chats-panel {
+  flex: none;
+  width: 300px;
+  position: sticky;
+  top: 62px;
+  height: calc(100vh - 62px);
+  overflow-y: auto;
+  padding: 18px 16px 24px;
+  border-left: 1px solid var(--line);
+}
+
+.chats-panel__title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 1099px) {
+  .chats-panel {
+    display: none;
+  }
+}
+
 .main {
   flex: 1;
   width: 100%;

@@ -116,9 +116,7 @@ class StubAgent:
             question=question,
             answer="There are 3 customers.",
             sql="SELECT count(*) FROM customers",
-            result=QueryResult(
-                columns=("count",), rows=((3,),), seconds=0.01, truncated=False
-            ),
+            result=QueryResult(columns=("count",), rows=((3,),), seconds=0.01, truncated=False),
             trace=trace,
         )
 
@@ -136,7 +134,7 @@ def _install(monkeypatch, stub: StubAgent, tmp_path):
     """
     app.dependency_overrides[get_agent] = lambda: stub
     monkeypatch.setattr(api, "get_agent", lambda: stub)
-    monkeypatch.setattr(api, "resolve_agent", lambda dataset_id=None: stub)
+    monkeypatch.setattr(api, "resolve_agent", lambda dataset_id=None, user_id=None: stub)
 
     from sqlagent.store import Store
 
@@ -483,9 +481,7 @@ def test_an_empty_thread_can_be_created_for_the_new_chat_button(client):
 
 
 def test_deleting_a_thread_removes_it_and_its_turns(client):
-    thread = client.post("/api/ask", json={"question": "delete me"}).json()[
-        "conversation_id"
-    ]
+    thread = client.post("/api/ask", json={"question": "delete me"}).json()["conversation_id"]
 
     assert client.delete(f"/api/conversations/{thread}").status_code == 200
     assert client.get(f"/api/conversations/{thread}").status_code == 404
@@ -580,9 +576,7 @@ def test_an_invalid_option_value_is_rejected(client):
 
 
 def test_vote_samples_are_bounded(client):
-    response = client.post(
-        "/api/ask", json={"question": "q", "options": {"vote_samples": 99}}
-    )
+    response = client.post("/api/ask", json={"question": "q", "options": {"vote_samples": 99}})
 
     assert response.status_code == 422
 
@@ -599,9 +593,7 @@ def test_a_setting_outside_the_allow_list_is_not_accepted(client_and_agent):
 def test_the_stream_accepts_options_as_json(client_and_agent):
     client, stub = client_and_agent
 
-    with client.stream(
-        "GET", '/api/ask/stream?question=q&options={"use_critic":true}'
-    ) as response:
+    with client.stream("GET", '/api/ask/stream?question=q&options={"use_critic":true}') as response:
         "".join(response.iter_text())
 
     assert stub.seen_options == {"use_critic": True}
@@ -756,8 +748,7 @@ def test_no_toggle_contradicts_the_tier():
         for name, running in effective.items():
             if name in shown and getattr(config, name) != running:
                 lying.append(
-                    f"{name} shows {getattr(config, name)!r} "
-                    f"but runs {running!r} at tier={tier}"
+                    f"{name} shows {getattr(config, name)!r} but runs {running!r} at tier={tier}"
                 )
 
     assert not lying, "controls contradicting the tier: " + "; ".join(lying)
@@ -864,8 +855,8 @@ def test_a_steady_history_reports_no_change(client_and_store):
 
 def test_a_surge_of_failures_is_reported(client_and_store):
     test_client, store = client_and_store
-    record(store, 60)                 # the baseline, written first
-    record(store, 50, ok=False)       # the recent period
+    record(store, 60)  # the baseline, written first
+    record(store, 50, ok=False)  # the recent period
 
     payload = test_client.get("/api/drift?recent=50&baseline=60").json()
 
@@ -880,8 +871,8 @@ def test_the_recent_period_is_the_newest_questions(client_and_store):
     """Reversed, this compares the baseline against itself and reports calm —
     which reads as good news."""
     test_client, store = client_and_store
-    record(store, 60, ok=False)       # older
-    record(store, 50)                 # newer
+    record(store, 60, ok=False)  # older
+    record(store, 50)  # newer
 
     payload = test_client.get("/api/drift?recent=50&baseline=60").json()
 
@@ -895,3 +886,18 @@ def test_an_absurd_window_is_rejected_rather_than_scanning_everything(client_and
     test_client, _ = client_and_store
 
     assert test_client.get("/api/drift?recent=100000").status_code == 422
+
+
+def test_another_user_cannot_read_or_delete_my_chat(client):
+    from sqlagent.api.auth_routes import require_user
+    from sqlagent.auth import User
+
+    app.dependency_overrides[require_user] = lambda: User("ada", "ada@example.com", "approved")
+    created = client.post("/api/conversations", json={}).json()
+    assert client.get("/api/conversations").json()[0]["id"] == created["id"]
+
+    app.dependency_overrides[require_user] = lambda: User("bo", "bo@example.com", "approved")
+    assert client.get("/api/conversations").json() == []
+    assert client.get(f"/api/conversations/{created['id']}").status_code == 404
+    assert client.delete(f"/api/conversations/{created['id']}").status_code == 404
+    assert client.get("/api/health?dataset_id=nope").status_code in (200, 404)

@@ -54,7 +54,7 @@ import shutil
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -69,6 +69,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from sqlagent.api.auth_routes import require_user
 from sqlagent.api.auth_routes import router as auth_router
+from sqlagent.auth import User
 from sqlagent.clarify import CLARIFICATION_ERROR
 from sqlagent.config import OVERRIDABLE, Settings, settings
 from sqlagent.conversation import Turn, carryable_result
@@ -561,7 +562,12 @@ def get_agent() -> SqlAgent:
 @lru_cache(maxsize=1)
 def get_store() -> Store:
     """History and dataset records. One SQLite file under the data directory."""
-    return Store(Path(settings().data_dir) / "sqlagent.db")
+    config = settings()
+    return Store(
+        Path(config.data_dir) / "sqlagent.db",
+        # Chats live in Neon when it is configured, so a restart does not wipe them.
+        state_url=config.control_database_url or None,
+    )
 
 
 @lru_cache(maxsize=8)
@@ -583,8 +589,12 @@ def get_dataset_agent(dataset_id: str) -> SqlAgent:
     return agent
 
 
-def resolve_agent(dataset_id: str | None) -> SqlAgent:
+def resolve_agent(dataset_id: str | None, user_id: str | None = None) -> SqlAgent:
     if dataset_id:
+        # Someone else's dataset is "not found", not "forbidden": its id is not
+        # something to confirm exists.
+        if get_store().get_dataset(dataset_id, user_id=user_id) is None:
+            raise HTTPException(status_code=404, detail=f"No dataset '{dataset_id}'")
         return get_dataset_agent(dataset_id)
     try:
         return get_agent()
@@ -618,9 +628,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # `Annotated[X, Depends(f)]` is the current FastAPI idiom for injection: it
 # keeps the dependency in the type rather than in a mutable default argument,
 # which is both clearer and avoids the classic Python default-argument trap.
-def current_agent(dataset_id: Annotated[str | None, Query()] = None) -> SqlAgent:
+CurrentUser = Annotated[User | None, Depends(require_user)]
+
+
+def owner(user: User | None) -> str | None:
+    """The id that scopes chats and datasets. ``None`` only where auth is stubbed."""
+    return user.id if user else None
+
+
+def current_agent(user: CurrentUser, dataset_id: Annotated[str | None, Query()] = None) -> SqlAgent:
     """The agent for ``?dataset_id=`` if given, else the configured database."""
-    return resolve_agent(dataset_id)
+    return resolve_agent(dataset_id, owner(user))
 
 
 AgentDep = Annotated[SqlAgent, Depends(current_agent)]
@@ -676,10 +694,10 @@ def liveness() -> dict[str, str]:
 
 
 @app.get("/api/health", response_model=HealthResponse)
-def health(dataset_id: Annotated[str | None, Query()] = None) -> HealthResponse:
+def health(user: CurrentUser, dataset_id: Annotated[str | None, Query()] = None) -> HealthResponse:
     config = settings()
     try:
-        agent = resolve_agent(dataset_id)
+        agent = resolve_agent(dataset_id, owner(user))
     except HTTPException as exc:
         if exc.status_code != 503:
             raise
@@ -717,13 +735,14 @@ def get_schema(agent: AgentDep) -> SchemaResponse:
 
 
 @app.post("/api/ask", response_model=AskResponse)
-async def ask(request: AskRequest) -> AskResponse:
+async def ask(request: AskRequest, user: CurrentUser) -> AskResponse:
     """Answer a question and return everything at once."""
-    agent = await run_in_threadpool(resolve_agent, request.dataset_id)
+    uid = owner(user)
+    agent = await run_in_threadpool(resolve_agent, request.dataset_id, uid)
     conversation_id = await run_in_threadpool(
-        _ensure_conversation, request.conversation_id, request.dataset_id
+        _ensure_conversation, request.conversation_id, request.dataset_id, uid
     )
-    history = await run_in_threadpool(_load_history, conversation_id)
+    history = await run_in_threadpool(_load_history, conversation_id, uid)
 
     options = request.options.overrides() if request.options else None
 
@@ -736,11 +755,13 @@ async def ask(request: AskRequest) -> AskResponse:
         source="api",
     )
 
-    await run_in_threadpool(_record, result, request.dataset_id, conversation_id)
+    await run_in_threadpool(_record, result, request.dataset_id, conversation_id, uid)
     return to_response(result, conversation_id)
 
 
-def _ensure_conversation(conversation_id: str | None, dataset_id: str | None) -> str:
+def _ensure_conversation(
+    conversation_id: str | None, dataset_id: str | None, user_id: str | None = None
+) -> str:
     """Return the thread to use, creating one if the client did not name it.
 
     The server creates the thread rather than requiring the client to do it
@@ -752,12 +773,12 @@ def _ensure_conversation(conversation_id: str | None, dataset_id: str | None) ->
     should cost the user nothing.
     """
     store = get_store()
-    if conversation_id and store.get_conversation(conversation_id):
+    if conversation_id and store.get_conversation(conversation_id, user_id=user_id):
         return conversation_id
-    return store.create_conversation(dataset_id=dataset_id)
+    return store.create_conversation(dataset_id=dataset_id, user_id=user_id)
 
 
-def _load_history(conversation_id: str | None) -> list[Turn]:
+def _load_history(conversation_id: str | None, user_id: str | None = None) -> list[Turn]:
     """Read a thread's turns for the model.
 
     Only *successful* turns carry SQL worth building on, but failed ones are
@@ -784,7 +805,7 @@ def _load_history(conversation_id: str | None) -> list[Turn]:
                 # message is it. Without this the turn reads as a failure.
                 clarification=(entry.answer if entry.error == CLARIFICATION_ERROR else None),
             )
-            for entry in get_store().conversation_entries(conversation_id)
+            for entry in get_store().conversation_entries(conversation_id, user_id=user_id)
         ]
     except Exception:  # noqa: BLE001 - context is an enhancement, not a requirement
         logger.exception("could not load conversation history")
@@ -825,7 +846,10 @@ def _jsonable(cell: object) -> object:
 
 
 def _record(
-    result: AgentResult, dataset_id: str | None, conversation_id: str | None = None
+    result: AgentResult,
+    dataset_id: str | None,
+    conversation_id: str | None = None,
+    user_id: str | None = None,
 ) -> None:
     """Append one question to the history.
 
@@ -869,6 +893,7 @@ def _record(
             model_calls=result.trace.model_calls,
             tokens=result.trace.input_tokens + result.trace.output_tokens,
             repairs=result.trace.repair_count,
+            user_id=user_id,
         )
         if conversation_id:
             store.touch_conversation(conversation_id, title=result.question)
@@ -878,6 +903,7 @@ def _record(
 
 @app.get("/api/ask/stream")
 async def ask_stream(
+    user: CurrentUser,
     question: Annotated[str, Query(min_length=1, max_length=2000)],
     dataset_id: Annotated[str | None, Query()] = None,
     conversation_id: Annotated[str | None, Query()] = None,
@@ -903,9 +929,10 @@ async def ask_stream(
     except Exception as exc:  # noqa: BLE001 - a bad query string is a 400, not a 500
         raise HTTPException(status_code=400, detail=f"invalid options: {exc}") from exc
 
-    agent = await run_in_threadpool(resolve_agent, dataset_id)
-    thread_id = await run_in_threadpool(_ensure_conversation, conversation_id, dataset_id)
-    history = await run_in_threadpool(_load_history, thread_id)
+    uid = owner(user)
+    agent = await run_in_threadpool(resolve_agent, dataset_id, uid)
+    thread_id = await run_in_threadpool(_ensure_conversation, conversation_id, dataset_id, uid)
+    history = await run_in_threadpool(_load_history, thread_id, uid)
 
     queue: asyncio.Queue[tuple[str, dict] | None] = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -926,7 +953,7 @@ async def ask_stream(
                 session_id=thread_id,
                 source="web",
             )
-            await run_in_threadpool(_record, result, dataset_id, thread_id)
+            await run_in_threadpool(_record, result, dataset_id, thread_id, uid)
             await queue.put(("result", to_response(result, thread_id).model_dump()))
         except Exception as exc:  # noqa: BLE001
             logger.exception("streaming request failed")
@@ -968,6 +995,7 @@ async def ask_stream(
 
 @app.get("/api/schema/graph", response_model=GraphResponse)
 def schema_graph(
+    user: CurrentUser,
     dataset_id: Annotated[str | None, Query()] = None,
 ) -> GraphResponse:
     """The foreign-key graph, with positions, ready for the client to draw.
@@ -976,7 +1004,7 @@ def schema_graph(
     dependency, the graph is small, and it keeps the client a pure renderer
     with no layout engine of its own.
     """
-    agent = resolve_agent(dataset_id)
+    agent = resolve_agent(dataset_id, owner(user))
     graph = agent.graph
     snapshot = agent.snapshot
 
@@ -1031,7 +1059,7 @@ def schema_graph(
 
 
 @app.post("/api/datasets", response_model=DatasetResponse)
-async def upload_dataset(file: Annotated[UploadFile, File()]) -> DatasetResponse:
+async def upload_dataset(file: Annotated[UploadFile, File()], user: CurrentUser) -> DatasetResponse:
     """Upload a CSV, Excel workbook or PostgreSQL dump and make it queryable.
 
     The file is streamed to a temporary path first: reading a 500 MB upload
@@ -1069,12 +1097,12 @@ async def upload_dataset(file: Annotated[UploadFile, File()]) -> DatasetResponse
     finally:
         temporary.unlink(missing_ok=True)
 
-    await run_in_threadpool(get_store().save_dataset, dataset)
+    await run_in_threadpool(partial(get_store().save_dataset, dataset, user_id=owner(user)))
     return DatasetResponse(**dataset.to_dict())
 
 
 @app.get("/api/datasets", response_model=list[DatasetResponse])
-def list_datasets() -> list[DatasetResponse]:
+def list_datasets(user: CurrentUser) -> list[DatasetResponse]:
     return [
         DatasetResponse(
             id=d["id"],
@@ -1085,13 +1113,13 @@ def list_datasets() -> list[DatasetResponse]:
             created_at=d["created_at"],
             note=d["note"] or "",
         )
-        for d in get_store().list_datasets()
+        for d in get_store().list_datasets(user_id=owner(user))
     ]
 
 
 @app.delete("/api/datasets/{dataset_id}")
-async def delete_dataset(dataset_id: str) -> dict:
-    if not get_store().delete_dataset(dataset_id):
+async def delete_dataset(dataset_id: str, user: CurrentUser) -> dict:
+    if not get_store().delete_dataset(dataset_id, user_id=owner(user)):
         raise HTTPException(status_code=404, detail=f"No dataset '{dataset_id}'")
     get_dataset_agent.cache_clear()
     store = object_store(settings())
@@ -1113,13 +1141,15 @@ async def delete_dataset(dataset_id: str) -> dict:
 
 
 @app.get("/api/conversations", response_model=list[ConversationSummary])
-def list_conversations(limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[dict]:
+def list_conversations(
+    user: CurrentUser, limit: Annotated[int, Query(ge=1, le=200)] = 50
+) -> list[dict]:
     """Threads, most recently used first."""
-    return get_store().list_conversations(limit=limit)
+    return get_store().list_conversations(limit=limit, user_id=owner(user))
 
 
 @app.post("/api/conversations", response_model=ConversationSummary)
-def create_conversation(request: NewConversationRequest) -> dict:
+def create_conversation(request: NewConversationRequest, user: CurrentUser) -> dict:
     """Start an empty thread.
 
     Rarely needed — asking a question with no ``conversation_id`` creates one
@@ -1127,25 +1157,25 @@ def create_conversation(request: NewConversationRequest) -> dict:
     immediately, without waiting for a question to be typed.
     """
     store = get_store()
-    conversation_id = store.create_conversation(dataset_id=request.dataset_id)
-    created = store.get_conversation(conversation_id)
+    conversation_id = store.create_conversation(dataset_id=request.dataset_id, user_id=owner(user))
+    created = store.get_conversation(conversation_id, user_id=owner(user))
     assert created is not None
     return {**created, "turns": 0}
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=ConversationDetail)
-def get_conversation(conversation_id: str) -> ConversationDetail:
+def get_conversation(conversation_id: str, user: CurrentUser) -> ConversationDetail:
     """One thread and every turn in it, oldest first.
 
     This is what the UI calls to restore a thread after a reload, so the
     transcript survives a refresh rather than living only in browser memory.
     """
     store = get_store()
-    conversation = store.get_conversation(conversation_id)
+    conversation = store.get_conversation(conversation_id, user_id=owner(user))
     if conversation is None:
         raise HTTPException(status_code=404, detail=f"No conversation '{conversation_id}'")
 
-    entries = store.conversation_entries(conversation_id)
+    entries = store.conversation_entries(conversation_id, user_id=owner(user))
     return ConversationDetail(
         conversation={**conversation, "turns": len(entries)},
         entries=[entry.to_dict() for entry in entries],
@@ -1154,6 +1184,7 @@ def get_conversation(conversation_id: str) -> ConversationDetail:
 
 @app.get("/api/search", response_model=list[SearchHit])
 def search_turns(
+    user: CurrentUser,
     q: Annotated[str, Query(min_length=1, max_length=200)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[SearchHit]:
@@ -1166,7 +1197,10 @@ def search_turns(
     opened in context, which makes it useful again.
     """
     store = get_store()
-    titles = {item["id"]: item["title"] for item in store.list_conversations(limit=200)}
+    titles = {
+        item["id"]: item["title"]
+        for item in store.list_conversations(limit=200, user_id=owner(user))
+    }
 
     return [
         SearchHit(
@@ -1179,7 +1213,7 @@ def search_turns(
             conversation_id=entry.conversation_id,
             conversation_title=titles.get(entry.conversation_id or ""),
         )
-        for entry in store.search_turns(q, limit=limit)
+        for entry in store.search_turns(q, limit=limit, user_id=owner(user))
     ]
 
 
@@ -1234,13 +1268,14 @@ def suggestions(agent: AgentDep) -> SuggestionsResponse:
 
 
 @app.get("/api/stats", response_model=StatsResponse)
-def stats() -> dict:
+def stats(user: CurrentUser) -> dict:
     """Aggregate numbers across every question ever asked."""
-    return get_store().stats()
+    return get_store().stats(user_id=owner(user))
 
 
 @app.get("/api/drift", response_model=DriftResponse)
 def drift(
+    user: CurrentUser,
     recent: Annotated[int, Query(ge=10, le=2000)] = 100,
     baseline: Annotated[int, Query(ge=10, le=5000)] = 300,
 ) -> DriftResponse:
@@ -1252,7 +1287,7 @@ def drift(
     """
     from sqlagent.drift import detect_drift, split_history
 
-    entries = get_store().recent_turns(limit=recent + baseline)
+    entries = get_store().recent_turns(limit=recent + baseline, user_id=owner(user))
     earlier, latest = split_history(entries, recent_n=recent)
     report = detect_drift(earlier, latest)
 
@@ -1279,8 +1314,8 @@ def drift(
 
 
 @app.delete("/api/conversations/{conversation_id}")
-def delete_conversation(conversation_id: str) -> dict:
-    if not get_store().delete_conversation(conversation_id):
+def delete_conversation(conversation_id: str, user: CurrentUser) -> dict:
+    if not get_store().delete_conversation(conversation_id, user_id=owner(user)):
         raise HTTPException(status_code=404, detail=f"No conversation '{conversation_id}'")
     return {"deleted": conversation_id}
 

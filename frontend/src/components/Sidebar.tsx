@@ -214,7 +214,7 @@ export function Sidebar({
 
 // --------------------------------------------------------------------------
 
-function ChatList({
+export function ChatList({
   conversations,
   hits,
   stats,

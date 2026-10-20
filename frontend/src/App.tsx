@@ -33,6 +33,7 @@ import {
   type ProgressEvent,
   type SchemaResponse,
 } from './api';
+import { ChatsPanel } from './components/ChatsPanel';
 import { Drift } from './components/Drift';
 import { Sidebar } from './components/Sidebar';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -392,6 +393,7 @@ export default function App({
         </div>
       </header>
 
+      <div className="body">
       <main className={`main ${empty ? '' : 'main--thread'}`}>
         {empty && (
           <section className="hero">
@@ -458,6 +460,15 @@ export default function App({
           )}
         </div>
       </main>
+      <ChatsPanel
+        activeId={threadId}
+        refreshKey={`${threadId ?? ''}:${busy}:${exchanges.length}`}
+        onOpen={openThread}
+        onDeleted={(id) => {
+          if (id === threadId) startNewThread();
+        }}
+      />
+      </div>
 
       {drawerOpen && (
         <Sidebar

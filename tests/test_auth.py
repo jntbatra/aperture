@@ -106,7 +106,7 @@ def test_health_stays_public_for_probes(client):
         snapshot = type("S", (dict,), {"version": "v"})({"t": 1})
 
     app.dependency_overrides[get_agent] = lambda: Agent()
-    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/healthz").status_code == 200
 
 
 def test_session_needs_a_bearer_token(client):

@@ -50,8 +50,15 @@ def test_records_and_returns_a_question(store: Store):
 def test_failures_are_recorded_too(store: Store):
     """A question that could not be answered is often the most useful entry."""
     thread = store.create_conversation()
-    add(store, "impossible", conversation_id=thread, ok=False,
-        error="no such table", sql=None, answer=None)
+    add(
+        store,
+        "impossible",
+        conversation_id=thread,
+        ok=False,
+        error="no such table",
+        sql=None,
+        answer=None,
+    )
 
     entry = store.conversation_entries(thread)[0]
 
@@ -61,8 +68,7 @@ def test_failures_are_recorded_too(store: Store):
 
 def test_diagnostics_survive_the_round_trip(store: Store):
     thread = store.create_conversation()
-    add(store, "q", conversation_id=thread, seconds=2.5, model_calls=3,
-        tokens=1234, repairs=1)
+    add(store, "q", conversation_id=thread, seconds=2.5, model_calls=3, tokens=1234, repairs=1)
 
     entry = store.conversation_entries(thread)[0]
 
@@ -83,8 +89,12 @@ def test_a_small_result_is_kept_for_the_next_turn(store: Store):
     """The bounded exception to "no result rows": without it, a follow-up
     saying "that ID" has nothing to refer to."""
     thread = store.create_conversation()
-    add(store, "which item?", conversation_id=thread,
-        result_preview={"columns": ["id"], "rows": [["abc-123"]]})
+    add(
+        store,
+        "which item?",
+        conversation_id=thread,
+        result_preview={"columns": ["id"], "rows": [["abc-123"]]},
+    )
 
     assert store.conversation_entries(thread)[0].result_preview == {
         "columns": ["id"],
@@ -104,9 +114,7 @@ def test_search_matches_a_substring(store: Store):
     add(store, "How many customers are there?")
     add(store, "Total revenue by region")
 
-    assert [e.question for e in store.search_turns("revenue")] == [
-        "Total revenue by region"
-    ]
+    assert [e.question for e in store.search_turns("revenue")] == ["Total revenue by region"]
 
 
 def test_search_is_case_insensitive_via_like(store: Store):
@@ -250,9 +258,7 @@ def test_data_survives_reopening(tmp_path):
     add(first, "remembered", conversation_id=thread)
     first.close()
 
-    assert [e.question for e in Store(path).conversation_entries(thread)] == [
-        "remembered"
-    ]
+    assert [e.question for e in Store(path).conversation_entries(thread)] == ["remembered"]
 
 
 # --------------------------------------------------------------------------
@@ -395,8 +401,11 @@ def test_a_clarification_does_not_lower_the_success_rate(tmp_path):
         store.record_question(question="q", answer="a", sql="SELECT 1", ok=True)
     for _ in range(3):
         store.record_question(
-            question="vague", answer="which one?", sql=None,
-            ok=False, error=CLARIFICATION_ERROR,
+            question="vague",
+            answer="which one?",
+            sql=None,
+            ok=False,
+            error=CLARIFICATION_ERROR,
         )
 
     stats = store.stats()
@@ -413,9 +422,7 @@ def test_a_real_failure_still_lowers_the_success_rate(tmp_path):
     store = Store(tmp_path / "s.db")
     for _ in range(3):
         store.record_question(question="q", answer="a", sql="SELECT 1", ok=True)
-    store.record_question(
-        question="q", answer=None, sql=None, ok=False, error="syntax error"
-    )
+    store.record_question(question="q", answer=None, sql=None, ok=False, error="syntax error")
 
     assert store.stats()["success_rate"] == 0.75
 
@@ -447,3 +454,71 @@ def test_recent_turns_come_back_newest_first(tmp_path):
         store.record_question(question=f"q{index}", answer="a", sql="SELECT 1", ok=True)
 
     assert [t.question for t in store.recent_turns(limit=3)] == ["q4", "q3", "q2"]
+
+
+# --------------------------------------------------------------------------
+# Per-user scoping
+# --------------------------------------------------------------------------
+
+
+def test_one_user_never_sees_anothers_chats(store: Store):
+    mine = store.create_conversation(user_id="ada")
+    theirs = store.create_conversation(user_id="bo")
+    add(store, "ada's question", conversation_id=mine, user_id="ada")
+    add(store, "bo's question", conversation_id=theirs, user_id="bo")
+
+    assert [c["id"] for c in store.list_conversations(user_id="ada")] == [mine]
+    assert store.get_conversation(theirs, user_id="ada") is None
+    assert store.conversation_entries(theirs, user_id="ada") == []
+    assert [e.question for e in store.search_turns("question", user_id="ada")] == ["ada's question"]
+    assert store.stats(user_id="ada")["total"] == 1
+    assert len(store.recent_turns(user_id="bo")) == 1
+
+
+def test_one_user_cannot_delete_anothers_chat(store: Store):
+    theirs = store.create_conversation(user_id="bo")
+    add(store, "keep me", conversation_id=theirs, user_id="bo")
+
+    assert store.delete_conversation(theirs, user_id="ada") is False
+    assert len(store.conversation_entries(theirs, user_id="bo")) == 1
+    assert store.delete_conversation(theirs, user_id="bo") is True
+
+
+def test_datasets_belong_to_the_user_who_uploaded_them(store: Store, tmp_path):
+    from sqlagent.ingest import ingest_file
+
+    csv = tmp_path / "t.csv"
+    csv.write_text("a,b\n1,2\n")
+    dataset = ingest_file(csv, data_dir=tmp_path / "d", original_name="t.csv")
+    store.save_dataset(dataset, user_id="ada")
+
+    assert store.get_dataset(dataset.id, user_id="ada") is not None
+    assert store.get_dataset(dataset.id, user_id="bo") is None
+    assert store.list_datasets(user_id="bo") == []
+    assert store.delete_dataset(dataset.id, user_id="bo") is False
+
+
+def test_a_store_written_before_users_existed_is_upgraded(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    db = sqlite3.connect(path)
+    db.executescript(
+        """
+        CREATE TABLE history (id INTEGER PRIMARY KEY AUTOINCREMENT, asked_at TEXT NOT NULL,
+            question TEXT NOT NULL, answer TEXT, sql TEXT, dataset_id TEXT, ok INTEGER NOT NULL,
+            error TEXT, row_count INTEGER, seconds REAL, model_calls INTEGER, tokens INTEGER,
+            repairs INTEGER);
+        CREATE TABLE conversations (id TEXT PRIMARY KEY, started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL, title TEXT NOT NULL, dataset_id TEXT);
+        INSERT INTO history (asked_at, question, ok) VALUES ('2026-01-01T00:00:00', 'old', 1);
+        """
+    )
+    db.commit()
+    db.close()
+
+    upgraded = Store(path)
+    thread = upgraded.create_conversation(user_id="ada")
+    add(upgraded, "new", conversation_id=thread, user_id="ada")
+    assert [e.question for e in upgraded.conversation_entries(thread, user_id="ada")] == ["new"]
+    assert upgraded.stats()["total"] == 2

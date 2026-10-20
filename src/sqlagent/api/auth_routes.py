@@ -19,7 +19,6 @@ COOKIE = "aperture_session"
 # Reachable without a session. Everything else under /api needs one.
 PUBLIC_PATHS = frozenset(
     {
-        "/api/health",
         "/api/healthz",
         "/api/auth/session",
         "/api/auth/logout",
