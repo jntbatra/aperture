@@ -9,7 +9,13 @@ import { useState, type FormEvent } from 'react';
 import { ApiError, startSession, type Me } from '../api';
 import { authClient } from '../neonAuth';
 
-export function AuthPage({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
+export function AuthPage({
+  onSignedIn,
+  onBack,
+}: {
+  onSignedIn: (me: Me) => void;
+  onBack?: () => void;
+}) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -132,6 +138,22 @@ export function AuthPage({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
         >
           {mode === 'login' ? 'No account? Request access' : 'Have an account? Sign in'}
         </button>
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--muted-foreground)',
+              cursor: 'pointer',
+              font: 'inherit',
+              fontSize: '0.85rem',
+            }}
+          >
+            ← Back to home
+          </button>
+        )}
       </form>
     </main>
   );

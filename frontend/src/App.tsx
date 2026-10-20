@@ -208,7 +208,7 @@ export default function App({
 
   // When the selected upload is gone, use the newest one that exists rather
   // than a dead id or silently nothing.
-  const useExistingDataset = useCallback(() => {
+  const fallBackToExistingDataset = useCallback(() => {
     listDatasets()
       .then((all) => setDatasetId((current) =>
         current && all.some((d) => d.id === current) ? current : (all[0]?.id ?? null),
@@ -230,7 +230,7 @@ export default function App({
         // The selected upload is gone (uploads do not survive a restart on the
         // free plan). That is not "offline": switch to one that exists.
         if (datasetId && exc instanceof ApiError && exc.status === 404) {
-          useExistingDataset();
+          fallBackToExistingDataset();
         } else {
           setHealth(null);
         }
@@ -240,7 +240,7 @@ export default function App({
     getSuggestions(datasetId)
       .then((payload) => setSuggested(payload.questions))
       .catch(() => setSuggested([]));
-  }, [datasetId, useExistingDataset]);
+  }, [datasetId, fallBackToExistingDataset]);
 
   // Restore the thread that was open when the page was last closed. A
   // conversation that evaporates on refresh is not a conversation.
