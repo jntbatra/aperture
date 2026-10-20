@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import type { AskResponse } from '../api';
+import { runQuery, type AskResponse, type QueryResult } from '../api';
 import { Progress } from './Progress';
 import { ResultTable, SqlPanel } from './ResultPanels';
 import type { ProgressEvent } from '../api';
@@ -50,9 +50,11 @@ interface Props {
   events: ProgressEvent[];
   /** Answer a clarifying question by clicking one of its options. */
   onReply?: (text: string) => void;
+  /** The dataset the chat is about, so a re-run hits the same database. */
+  datasetId?: string | null;
 }
 
-export function Transcript({ exchanges, events, onReply }: Props) {
+export function Transcript({ exchanges, events, onReply, datasetId }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
   // Follow the conversation down as it grows, the way every chat interface
@@ -71,6 +73,7 @@ export function Transcript({ exchanges, events, onReply }: Props) {
           key={exchange.key}
           exchange={exchange}
           events={events}
+          datasetId={datasetId}
           // Only the newest turn can still be answered. Options on an older
           // clarification are stale — that question was already resolved.
           onReply={index === exchanges.length - 1 ? onReply : undefined}
@@ -154,11 +157,30 @@ function ExchangeView({
   exchange,
   events,
   onReply,
+  datasetId,
 }: {
   exchange: Exchange;
   events: ProgressEvent[];
   onReply?: (text: string) => void;
+  datasetId?: string | null;
 }) {
+  // A re-run's rows live only here, in the page. Nothing is saved.
+  const [rerun, setRerun] = useState<QueryResult | null>(null);
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const run = async (sql: string) => {
+    setRunning(true);
+    setRunError(null);
+    try {
+      setRerun(await runQuery(sql, datasetId));
+    } catch (exc) {
+      setRunError(exc instanceof Error ? exc.message : 'Could not run the query.');
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const { question, result, error, pending, restored } = exchange;
   const asking = result?.error === 'needs_clarification';
   const asks = asking ? result.clarification_asks ?? [] : [];
@@ -241,9 +263,32 @@ function ExchangeView({
               </div>
             )}
 
-            {result.sql && <SqlPanel sql={result.sql} />}
+            {result.sql && (
+              <div className="sqlrow">
+                <SqlPanel sql={result.sql} />
+                <button
+                  className="ghost-button sqlrow__run"
+                  onClick={() => run(result.sql as string)}
+                  disabled={running}
+                  title="Run this query again (read-only)"
+                >
+                  {running ? 'Running…' : 'Run'}
+                </button>
+              </div>
+            )}
 
-            {result.columns.length > 0 && (
+            {runError && <div className="notice notice--error">{runError}</div>}
+
+            {rerun && (
+              <ResultTable
+                columns={rerun.columns}
+                rows={rerun.rows}
+                truncated={rerun.truncated}
+                rowCount={rerun.row_count}
+              />
+            )}
+
+            {!rerun && result.columns.length > 0 && (
               <ResultTable
                 columns={result.columns}
                 rows={result.rows}
@@ -255,12 +300,12 @@ function ExchangeView({
             {/* Only when the table genuinely is not there. A restored turn that
                 kept its rows needs no apology, and printing one next to a
                 visible table would be nonsense. */}
-            {restored && result.sql && result.columns.length === 0 && (
+            {restored && result.sql && result.columns.length === 0 && !rerun && (
               <div className="turn__note">
                 {exchange.restoredRowCount
                   ? `${exchange.restoredRowCount.toLocaleString()} rows were returned. `
                   : ''}
-                The table was not kept — re-run the query to see it.
+                The table was not kept. Press Run to see it.
               </div>
             )}
           </>

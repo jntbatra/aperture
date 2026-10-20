@@ -469,6 +469,21 @@ have: how hard to try.
 """
 
 
+class QueryRequest(BaseModel):
+    """A statement to re-run, e.g. the SQL shown under an earlier answer."""
+
+    sql: str = Field(min_length=1, max_length=20_000)
+    dataset_id: str | None = None
+
+
+class QueryResponse(BaseModel):
+    columns: list[str]
+    rows: list[list[Any]]
+    row_count: int
+    truncated: bool
+    seconds: float
+
+
 class NewConversationRequest(BaseModel):
     dataset_id: str | None = None
 
@@ -899,6 +914,59 @@ def _record(
             store.touch_conversation(conversation_id, title=result.question)
     except Exception:  # noqa: BLE001 - history must never break answering
         logger.exception("could not record history")
+
+
+@app.post("/api/query", response_model=QueryResponse)
+async def run_query(request: QueryRequest, user: CurrentUser) -> QueryResponse:
+    """Re-run a statement, read-only, without a model call.
+
+    Answers are stored with the SQL and a bounded preview rather than the full
+    table, so reopening a chat shows the query and this runs it again. It goes
+    through the same gates as a generated query: one read-only SELECT, tables
+    limited to the schema, a plan-cost check, a row cap and a timeout. It is not
+    recorded in the chat history, because it is not a question.
+    """
+    from sqlagent.db.execute import ExecutionError, execute
+    from sqlagent.guards.cost import CostRejected
+    from sqlagent.guards.cost import check as check_cost
+    from sqlagent.guards.validator import ValidationError, validate
+
+    agent = await run_in_threadpool(resolve_agent, request.dataset_id, owner(user))
+    config = settings()
+
+    def run() -> QueryResponse:
+        validated = validate(
+            request.sql,
+            dialect=agent.dialect.sqlglot_name,
+            row_limit=config.row_limit,
+            allowed_tables=set(agent.snapshot.tables),
+        )
+        check_cost(
+            agent.engine,
+            validated.sql,
+            dialect=agent.dialect,
+            max_cost=config.max_plan_cost,
+            max_estimated_rows=config.max_plan_rows,
+        )
+        result = execute(
+            agent.engine,
+            validated.sql,
+            row_limit=config.row_limit,
+            statement_timeout_ms=config.statement_timeout_ms,
+            dialect=agent.dialect,
+        )
+        return QueryResponse(
+            columns=list(result.columns),
+            rows=[[_jsonable(cell) for cell in row] for row in result.rows],
+            row_count=result.row_count,
+            truncated=result.truncated,
+            seconds=result.seconds,
+        )
+
+    try:
+        return await run_in_threadpool(run)
+    except (ValidationError, CostRejected, ExecutionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/ask/stream")

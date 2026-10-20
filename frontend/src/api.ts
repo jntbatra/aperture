@@ -277,6 +277,21 @@ const withDataset = (path: string, datasetId?: string | null) =>
 export const getHealth = (datasetId?: string | null) =>
   json<HealthResponse>(withDataset('/api/health', datasetId));
 
+export interface QueryResult {
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  truncated: boolean;
+  seconds: number;
+}
+
+/** Re-run a statement (read-only, no model call). */
+export const runQuery = (sql: string, datasetId?: string | null) =>
+  json<QueryResult>('/api/query', {
+    method: 'POST',
+    body: JSON.stringify({ sql, dataset_id: datasetId ?? null }),
+  });
+
 export const getSchema = (datasetId?: string | null) =>
   json<SchemaResponse>(withDataset('/api/schema', datasetId));
 

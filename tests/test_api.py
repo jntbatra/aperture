@@ -901,3 +901,43 @@ def test_another_user_cannot_read_or_delete_my_chat(client):
     assert client.get(f"/api/conversations/{created['id']}").status_code == 404
     assert client.delete(f"/api/conversations/{created['id']}").status_code == 404
     assert client.get("/api/health?dataset_id=nope").status_code in (200, 404)
+
+
+def _sqlite_agent(tmp_path):
+    """A real agent over a tiny SQLite file, to exercise /api/query end to end."""
+    import sqlite3
+
+    from sqlalchemy import create_engine
+
+    from sqlagent.pipeline import SqlAgent
+
+    path = tmp_path / "q.sqlite"
+    db = sqlite3.connect(path)
+    db.executescript(
+        "create table items (id integer primary key, name text);"
+        "insert into items values (1,'a'),(2,'b');"
+    )
+    db.commit()
+    db.close()
+    return SqlAgent(create_engine(f"sqlite:///{path}"))
+
+
+def test_a_saved_query_can_be_run_again(client, monkeypatch, tmp_path):
+    agent = _sqlite_agent(tmp_path)
+    monkeypatch.setattr(api, "resolve_agent", lambda dataset_id=None, user_id=None: agent)
+
+    body = client.post("/api/query", json={"sql": "SELECT id, name FROM items ORDER BY id"}).json()
+
+    assert body["columns"] == ["id", "name"]
+    assert body["rows"] == [[1, "a"], [2, "b"]]
+    assert body["row_count"] == 2
+
+
+def test_rerun_refuses_anything_but_a_read(client, monkeypatch, tmp_path):
+    agent = _sqlite_agent(tmp_path)
+    monkeypatch.setattr(api, "resolve_agent", lambda dataset_id=None, user_id=None: agent)
+
+    for sql in ("DELETE FROM items", "SELECT 1; DROP TABLE items", "SELECT * FROM secrets"):
+        response = client.post("/api/query", json={"sql": sql})
+        assert response.status_code == 400, sql
+    assert client.post("/api/query", json={"sql": "SELECT count(*) FROM items"}).status_code == 200

@@ -1603,3 +1603,20 @@ td.is-null {
   color: var(--foreground);
   box-shadow: var(--shadow-sm);
 }
+
+/* The SQL box with its Run pill to the right. */
+.sqlrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sqlrow > .panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.sqlrow__run {
+  flex: none;
+  margin-top: 10px;
+}

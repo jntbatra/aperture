@@ -219,6 +219,7 @@ export default function App({
     getConversation(saved)
       .then((detail) => {
         setThreadId(detail.conversation.id);
+        setDatasetId(detail.conversation.dataset_id ?? null);
         setExchanges(toExchanges(detail.entries));
       })
       .catch(() => {
@@ -302,6 +303,7 @@ export default function App({
 
     const detail = await getConversation(id);
     setThreadId(detail.conversation.id);
+    setDatasetId(detail.conversation.dataset_id ?? null);
     localStorage.setItem(THREAD_KEY, detail.conversation.id);
     setExchanges(toExchanges(detail.entries));
   }, []);
@@ -407,7 +409,12 @@ export default function App({
           </section>
         )}
 
-        {!empty && <Transcript exchanges={exchanges} events={events} onReply={submit} />}
+        {!empty && <Transcript
+            exchanges={exchanges}
+            events={events}
+            onReply={submit}
+            datasetId={datasetId}
+          />}
 
         <div className="composer">
           <div className="ask">
