@@ -212,3 +212,48 @@ def test_neon_postgres_url_gets_the_driver_named():
     config = Settings(control_database_url="postgresql://u:p@host/db?sslmode=require")
     engine = auth_module._make_engine(config)
     assert engine.dialect.driver == "psycopg"
+
+
+# --------------------------------------------------------------------------
+# API keys (for the SDKs and scripts) and the no-sign-in mode
+# --------------------------------------------------------------------------
+
+KEY_A = "a" * 32
+KEY_B = "b" * 32
+
+
+def with_settings(monkeypatch, **overrides):
+    config = Settings(**overrides)
+    monkeypatch.setattr(routes, "settings", lambda: config)
+
+
+def test_an_api_key_opens_the_api(client, monkeypatch):
+    with_settings(monkeypatch, api_keys=f"{KEY_A},{KEY_B}")
+    assert client.get("/api/datasets").status_code == 401
+    assert client.get("/api/datasets", headers=bearer(KEY_A)).status_code == 200
+    assert client.get("/api/datasets", headers=bearer(KEY_B)).status_code == 200
+    assert client.get("/api/datasets", headers=bearer("c" * 32)).status_code == 401
+
+
+def test_a_short_key_is_ignored(client, monkeypatch):
+    with_settings(monkeypatch, api_keys="short")
+    assert client.get("/api/datasets", headers=bearer("short")).status_code == 401
+
+
+def test_each_key_is_its_own_user(client, monkeypatch):
+    with_settings(monkeypatch, api_keys=f"{KEY_A},{KEY_B}")
+    made = client.post("/api/conversations", json={}, headers=bearer(KEY_A)).json()
+    assert client.get("/api/conversations", headers=bearer(KEY_A)).json()[0]["id"] == made["id"]
+    assert client.get("/api/conversations", headers=bearer(KEY_B)).json() == []
+    assert client.get(f"/api/conversations/{made['id']}", headers=bearer(KEY_B)).status_code == 404
+
+
+def test_auth_can_be_turned_off_for_a_trusted_machine(client, monkeypatch):
+    with_settings(monkeypatch, auth_required=False)
+    assert client.get("/api/datasets").status_code == 200
+    assert client.get("/api/auth/me").json() == {"email": "local@localhost"}
+
+
+def test_auth_is_on_by_default():
+    assert Settings().auth_required is True
+    assert Settings().api_key_list == []

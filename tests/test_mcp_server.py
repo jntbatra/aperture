@@ -191,3 +191,34 @@ def test_an_unknown_table_with_no_near_miss_still_answers(agent):
     payload = mcp.describe_table("zzzz")
 
     assert payload["did_you_mean"] == []
+
+
+# --------------------------------------------------------------------------
+# HTTP access needs an API key
+# --------------------------------------------------------------------------
+
+
+def _guarded():
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+
+    from sqlagent.mcp_server import BearerAuth
+
+    inner = Starlette(routes=[Route("/mcp", lambda request: PlainTextResponse("ok"))])
+    return TestClient(BearerAuth(inner, ["k" * 20]))
+
+
+def test_http_without_a_key_is_refused():
+    assert _guarded().get("/mcp").status_code == 401
+
+
+def test_http_with_a_wrong_key_is_refused():
+    wrong = {"Authorization": "Bearer " + "x" * 20}
+    assert _guarded().get("/mcp", headers=wrong).status_code == 401
+
+
+def test_http_with_the_key_gets_through():
+    response = _guarded().get("/mcp", headers={"Authorization": "Bearer " + "k" * 20})
+    assert (response.status_code, response.text) == (200, "ok")

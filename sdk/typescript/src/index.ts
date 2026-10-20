@@ -1,5 +1,5 @@
 /**
- * Typed client for the sql-agent HTTP service.
+ * Typed client for an Aperture server (the sql-agent HTTP service).
  *
  * Two tiers, both measured on all 500 BIRD mini-dev questions against corrected
  * gold (docs/10-the-ablation.md in the sql-agent repo):
@@ -32,8 +32,37 @@ export interface AskOptions {
    * answers — right for batch jobs where nobody can reply.
    */
   ambiguity?: "ask" | "guess";
+  /** Ask about an uploaded dataset instead of the server's configured database. */
+  datasetId?: string;
   /** Aborts the request. */
   signal?: AbortSignal;
+}
+
+export interface QueryOptions {
+  datasetId?: string;
+  signal?: AbortSignal;
+}
+
+/** Rows from re-running a statement with {@link SqlAgentClient.query}. */
+export interface QueryResult {
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+  truncated: boolean;
+  seconds: number;
+}
+
+export interface SchemaTable {
+  name: string;
+  columns: string[];
+  primary_key: string[];
+  references: string[];
+}
+
+export interface Schema {
+  version: string;
+  tableCount: number;
+  tables: SchemaTable[];
 }
 
 export interface Clarification {
@@ -77,6 +106,12 @@ export interface Answer {
 export interface SqlAgentClientOptions {
   /** e.g. `http://127.0.0.1:8000`. No trailing `/api`. */
   baseUrl: string;
+  /**
+   * An API key the server lists in `SQLAGENT_API_KEYS`. Sent as
+   * `Authorization: Bearer <key>`. Needed unless the server runs with
+   * `SQLAGENT_AUTH_REQUIRED=false`.
+   */
+  apiKey?: string;
   defaultTier?: Tier;
   /** Per-request timeout. The expensive tier can take 10s+ on a large schema. */
   timeoutMs?: number;
@@ -108,6 +143,7 @@ export const TIER_OPTIONS: Record<Tier, Record<string, unknown>> = {
 
 export class SqlAgentClient {
   private readonly baseUrl: string;
+  private readonly apiKey?: string;
   private readonly defaultTier: Tier;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
@@ -115,6 +151,7 @@ export class SqlAgentClient {
   constructor(options: SqlAgentClientOptions) {
     if (!options.baseUrl) throw new Error("baseUrl is required");
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.apiKey = options.apiKey;
     this.defaultTier = options.defaultTier ?? "cheap";
     this.timeoutMs = options.timeoutMs ?? 60_000;
     const f = options.fetch ?? (globalThis as { fetch?: typeof fetch }).fetch;
@@ -130,6 +167,7 @@ export class SqlAgentClient {
     const body = {
       question,
       conversation_id: options.conversationId ?? null,
+      dataset_id: options.datasetId ?? null,
       options: {
         ...TIER_OPTIONS[tier],
         ambiguity_handling: options.ambiguity === "guess" ? "best_effort" : "ask_human",
@@ -137,6 +175,38 @@ export class SqlAgentClient {
     };
     const raw = await this.request("POST", "/api/ask", body, options.signal);
     return toAnswer(raw as RawAnswer, tier);
+  }
+
+  /**
+   * Run a statement again, read-only, with no model call: the same checks the
+   * agent's own queries pass (one SELECT, known tables, row cap, timeout).
+   * Rejects with a 400 {@link SqlAgentError} if the statement is refused.
+   */
+  async query(sql: string, options: QueryOptions = {}): Promise<QueryResult> {
+    const raw = (await this.request(
+      "POST",
+      "/api/query",
+      { sql, dataset_id: options.datasetId ?? null },
+      options.signal,
+    )) as { columns: string[]; rows: unknown[][]; row_count: number; truncated: boolean; seconds: number };
+    return {
+      columns: raw.columns,
+      rows: raw.rows,
+      rowCount: raw.row_count,
+      truncated: raw.truncated,
+      seconds: raw.seconds,
+    };
+  }
+
+  /** The tables and columns the agent can see. */
+  async schema(options: QueryOptions = {}): Promise<Schema> {
+    const path = "/api/schema" + (options.datasetId ? `?dataset_id=${encodeURIComponent(options.datasetId)}` : "");
+    const raw = (await this.request("GET", path, undefined, options.signal)) as {
+      version: string;
+      table_count: number;
+      tables: SchemaTable[];
+    };
+    return { version: raw.version, tableCount: raw.table_count, tables: raw.tables };
   }
 
   /** Liveness and which database/mode the service is pointed at. */
@@ -158,6 +228,7 @@ export class SqlAgentClient {
     try {
       const headers: Record<string, string> = { Accept: "application/json" };
       if (body !== undefined) headers["Content-Type"] = "application/json";
+      if (this.apiKey) headers["Authorization"] = `Bearer ${this.apiKey}`;
 
       let response: Response;
       try {
@@ -240,3 +311,6 @@ function toAnswer(raw: RawAnswer, tier: Tier): Answer {
     tablesConsidered: raw.tables_considered,
   };
 }
+
+/** Same client under the product's name. */
+export { SqlAgentClient as ApertureClient };

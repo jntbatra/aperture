@@ -1,0 +1,49 @@
+name: Release SDK
+
+# Publishing is permanent, so it only happens on a tag you push on purpose:
+#   git tag sdk-ts-v0.2.0 && git push origin sdk-ts-v0.2.0     # npm
+#   git tag sdk-py-v0.2.0 && git push origin sdk-py-v0.2.0     # PyPI
+# Setup (once) is in sdk/RELEASING.md.
+on:
+  push:
+    tags: ["sdk-ts-v*", "sdk-py-v*"]
+
+jobs:
+  npm:
+    if: startsWith(github.ref_name, 'sdk-ts-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm test
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  pypi:
+    if: startsWith(github.ref_name, 'sdk-py-v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build pytest
+      - run: pip install ./sdk/python && python -m pytest -q sdk/python/tests
+      - run: python -m build sdk/python
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/python/dist

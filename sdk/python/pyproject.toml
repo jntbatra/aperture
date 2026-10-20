@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aperture-sql"
+version = "0.2.0"
+description = "Python client for an Aperture server: ask a database a question in English, get the answer, the SQL and the rows."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = ["httpx>=0.25"]
+keywords = ["sql", "text-to-sql", "llm", "postgres", "analytics", "aperture"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Database",
+]
+
+[project.urls]
+Homepage = "https://github.com/jntbatra/aperture/tree/master/sdk"
+Repository = "https://github.com/jntbatra/aperture"
+Issues = "https://github.com/jntbatra/aperture/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aperture_sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

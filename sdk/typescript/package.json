@@ -1,18 +1,41 @@
 {
-  "name": "sql-agent-client",
-  "version": "0.1.0",
-  "description": "Typed client for the sql-agent HTTP service: ask a database a question in English, cheap or expensive tier.",
+  "name": "aperture-sql",
+  "version": "0.2.0",
+  "description": "Typed client for an Aperture server: ask a database a question in English, get the answer, the SQL and the rows.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/client.test.js"
+    "test": "npm run build && node --test test/client.test.js",
+    "prepublishOnly": "npm run build"
   },
-  "engines": { "node": ">=18" },
-  "license": "UNLICENSED",
-  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
   "devDependencies": {
     "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "sql",
+    "text-to-sql",
+    "llm",
+    "postgres",
+    "analytics",
+    "aperture"
+  ],
+  "homepage": "https://github.com/jntbatra/aperture/tree/master/sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jntbatra/aperture.git",
+    "directory": "sdk/typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/jntbatra/aperture/issues"
   }
 }

@@ -132,10 +132,38 @@ make test
 # 4. Ask a question from the terminal
 .venv/bin/python -m sqlagent.cli "How many customers are there?"
 
-# 5. Or run the web interface
+# 5. Or run the web interface (add SQLAGENT_AUTH_REQUIRED=false to .env first;
+#    without it the API asks for sign-in, which needs the setup in docs/self-hosting.md)
 make api      # terminal 1 — http://localhost:8000
 make web      # terminal 2 — http://localhost:5173
 ```
+
+---
+
+## Ways to use it
+
+Aperture is self-hosted: you run the server against your own database and model
+account ([run your own](docs/self-hosting.md)). Then there are these ways in.
+
+| Way | What it is | Docs |
+|---|---|---|
+| **Web app** | Chat, history, uploads, schema graph. Sign-in with owner approval, or open on a trusted machine. | [self-hosting](docs/self-hosting.md) |
+| **REST API** | The routes the web app uses, with API-key auth. | [docs/api.md](docs/api.md) |
+| **Python SDK** | `pip install aperture-sql` | [sdk/python](sdk/python/README.md) |
+| **TypeScript SDK** | `npm install aperture-sql` | [sdk/typescript](sdk/typescript/README.md) |
+| **MCP server** | Lets Claude Desktop or any MCP client ask your database. | [docs/mcp.md](docs/mcp.md) |
+| **CLI** | `python -m sqlagent.cli "How many customers?"` | below |
+
+```python
+from aperture_sql import Aperture
+
+client = Aperture("http://127.0.0.1:8000", api_key="YOUR_KEY")
+answer = client.ask("How many customers are there?")
+print(answer.answer, answer.sql, answer.rows)
+```
+
+The CLI reads the same `.env` as the server and asks the database directly, with no
+server running. `--schema` prints the structure and `-q` hides progress.
 
 ---
 
@@ -154,7 +182,7 @@ top and work down.
 | 6 | [Running it](docs/06-operations.md) | Configuration, deployment, benchmarking, troubleshooting |
 | 7 | [Decisions and measurements](docs/07-decisions.md) | Every significant choice, what it cost, what it bought |
 | 8 | [Where the accuracy goes](docs/08-intent-design.md) | What `fast` really is, what the measurements rule out, and the one change the evidence points at |
-| — | [Aperture as a service](SAAS.md) | The hosted-product plan. Accounts, plans and auth were built and then removed (2026-10-04); the app now has no login |
+| — | [Aperture as a service](SAAS.md) | The hosted-product plan. Accounts and plans were removed (2026-10-04); sign-in with owner approval and API keys came back later, see [self-hosting](docs/self-hosting.md) |
 | — | [Tickets](TICKETS.md) | Every decision as a ticket with its real status: done, open, or won't-build with the reason |
 
 ---
@@ -278,3 +306,9 @@ something wrong or dangerous, because it will.
 Sample rows are real customer data and travel to the model provider. They can
 be restricted per column or switched off entirely — see
 [docs/06-operations.md](docs/06-operations.md#privacy).
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -84,3 +84,45 @@ test("an unknown tier is refused before any request", async () => {
   await assert.rejects(client.ask("q", { tier: "premium" }));
   assert.equal(calls.length, 0);
 });
+
+test("an API key is sent as a bearer token", async () => {
+  const { f, calls } = fakeFetch();
+  const client = new SqlAgentClient({ baseUrl: "http://agent:8000", apiKey: "k".repeat(24), fetch: f });
+  await client.ask("How many orders?");
+  assert.equal(calls[0].init.headers["Authorization"], "Bearer " + "k".repeat(24));
+});
+
+test("no key means no Authorization header", async () => {
+  const { f, calls } = fakeFetch();
+  await new SqlAgentClient({ baseUrl: "http://agent:8000", fetch: f }).ask("q");
+  assert.equal(calls[0].init.headers["Authorization"], undefined);
+});
+
+test("ask can target an uploaded dataset", async () => {
+  const { f, calls } = fakeFetch();
+  await new SqlAgentClient({ baseUrl: "http://agent:8000", fetch: f }).ask("q", { datasetId: "d1" });
+  assert.equal(calls[0].body.dataset_id, "d1");
+});
+
+test("query re-runs a statement and maps the rows", async () => {
+  const { f, calls } = fakeFetch(200, { columns: ["n"], rows: [[3]], row_count: 1, truncated: false, seconds: 0.01 });
+  const result = await new SqlAgentClient({ baseUrl: "http://agent:8000", fetch: f }).query("SELECT 3 AS n", { datasetId: "d1" });
+  assert.equal(calls[0].url, "http://agent:8000/api/query");
+  assert.deepEqual(calls[0].body, { sql: "SELECT 3 AS n", dataset_id: "d1" });
+  assert.deepEqual(result, { columns: ["n"], rows: [[3]], rowCount: 1, truncated: false, seconds: 0.01 });
+});
+
+test("a refused statement rejects with the server's reason", async () => {
+  const { f } = fakeFetch(400, { detail: "Only SELECT is allowed" });
+  await assert.rejects(
+    new SqlAgentClient({ baseUrl: "http://agent:8000", fetch: f }).query("DELETE FROM t"),
+    (e) => e instanceof SqlAgentError && e.status === 400 && /SELECT/.test(e.message),
+  );
+});
+
+test("schema is read from the dataset's own endpoint", async () => {
+  const { f, calls } = fakeFetch(200, { version: "v1", table_count: 1, tables: [{ name: "t", columns: ["id int"], primary_key: ["id"], references: [] }] });
+  const s = await new SqlAgentClient({ baseUrl: "http://agent:8000", fetch: f }).schema({ datasetId: "d 1" });
+  assert.equal(calls[0].url, "http://agent:8000/api/schema?dataset_id=d%201");
+  assert.equal(s.tableCount, 1);
+});

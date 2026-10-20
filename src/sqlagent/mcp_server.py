@@ -37,17 +37,24 @@ Running it::
 
     python -m sqlagent.mcp_server          # stdio, for a desktop client
     python -m sqlagent.mcp_server --http   # streamable HTTP, for a remote one
+
+Over HTTP the server asks for ``Authorization: Bearer <key>``, where the key is
+one of ``SQLAGENT_API_KEYS``. It refuses to start over HTTP with neither a key
+nor ``SQLAGENT_AUTH_REQUIRED=false``, and binds to 127.0.0.1 unless told
+otherwise. stdio needs neither: the client starts the process itself.
 """
 
 from __future__ import annotations
 
 import argparse
+import hmac
 import logging
 from functools import lru_cache
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from sqlalchemy import create_engine
+from starlette.responses import JSONResponse
 
 from sqlagent.config import Settings, settings
 from sqlagent.pipeline import SqlAgent
@@ -213,6 +220,27 @@ def _jsonable(cell: object) -> object:
     return str(cell)
 
 
+class BearerAuth:
+    """Refuse HTTP requests that do not carry one of the configured API keys."""
+
+    def __init__(self, app: Any, keys: list[str]) -> None:
+        self.app = app
+        self.keys = keys
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            headers = dict(scope["headers"])
+            scheme, _, presented = headers.get(b"authorization", b"").decode().partition(" ")
+            ok = scheme.lower() == "bearer" and any(
+                hmac.compare_digest(key, presented.strip()) for key in self.keys
+            )
+            if not ok:
+                response = JSONResponse({"detail": "A valid API key is required."}, status_code=401)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Aperture MCP server.")
     parser.add_argument(
@@ -220,16 +248,34 @@ def main() -> None:
         action="store_true",
         help="Serve over streamable HTTP instead of stdio (for a remote client).",
     )
+    parser.add_argument("--host", default="127.0.0.1", help="HTTP bind address.")
+    parser.add_argument("--port", type=int, default=8001, help="HTTP port.")
     args = parser.parse_args()
 
-    logging.basicConfig(level=settings().log_level)
+    config = settings()
+    logging.basicConfig(level=config.log_level)
+
+    if args.http and config.auth_required and not config.api_key_list:
+        parser.error(
+            "serving over HTTP needs SQLAGENT_API_KEYS (at least one key of 16+ "
+            "characters), or SQLAGENT_AUTH_REQUIRED=false on a trusted machine."
+        )
 
     # Warm before serving, so the first tool call does not pay for schema
     # reflection — a client that times out on its first call concludes the
     # server is broken.
     get_agent()
 
-    server.run(transport="streamable-http" if args.http else "stdio")
+    if not args.http:
+        server.run(transport="stdio")
+        return
+
+    import uvicorn
+
+    app = server.streamable_http_app(host=args.host)
+    if config.auth_required:
+        app = BearerAuth(app, config.api_key_list)
+    uvicorn.run(app, host=args.host, port=args.port, log_level=config.log_level.lower())
 
 
 if __name__ == "__main__":

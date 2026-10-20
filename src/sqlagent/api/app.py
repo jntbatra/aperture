@@ -636,6 +636,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     reports the problem — better than refusing to boot, which in a container
     turns into a crash loop with the real error buried in logs.
     """
+    if not settings().auth_required:
+        logger.warning(
+            "SQLAGENT_AUTH_REQUIRED=false: anyone who can reach this server can use it. "
+            "Run it only on a laptop or a trusted network."
+        )
     try:
         await run_in_threadpool(get_agent)
         logger.info("agent ready")

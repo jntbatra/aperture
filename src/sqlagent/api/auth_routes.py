@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import html
+import logging
 from functools import lru_cache
 from typing import Annotated
 
@@ -13,6 +16,8 @@ from pydantic import BaseModel
 
 from sqlagent.auth import Accounts, AuthError, User
 from sqlagent.config import settings
+
+logger = logging.getLogger(__name__)
 
 COOKIE = "aperture_session"
 
@@ -32,11 +37,28 @@ def get_accounts() -> Accounts:
     return Accounts(settings())
 
 
+LOCAL_USER = User("local", "local@localhost", "approved")
+
+
+def _api_key(request: Request, keys: list[str]) -> str | None:
+    """The configured key the request presented, if any. Constant-time compare."""
+    scheme, _, presented = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not presented:
+        return None
+    return next((k for k in keys if hmac.compare_digest(k, presented.strip())), None)
+
+
 async def require_user(request: Request) -> User | None:
     """Fail closed: no valid session for an approved user, no access."""
     path = request.url.path
     if not path.startswith("/api/") or path in PUBLIC_PATHS:
         return None
+    config = settings()
+    if not config.auth_required:
+        return LOCAL_USER
+    key = _api_key(request, config.api_key_list)
+    if key is not None:
+        return User(f"key:{hashlib.sha256(key.encode()).hexdigest()[:12]}", "api-key", "approved")
     accounts = get_accounts()
     user = await run_in_threadpool(accounts.user_for_session, request.cookies.get(COOKIE))
     if user is None:

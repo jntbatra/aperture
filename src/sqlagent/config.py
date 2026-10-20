@@ -588,6 +588,27 @@ class Settings(BaseSettings):
     is fine for a laptop and wrong for anything with more than one instance.
     """
 
+    api_keys: str = ""
+    """Comma-separated keys that may call the API with ``Authorization: Bearer <key>``.
+
+    For programs: the SDKs, the CLI's remote mode, scripts. Generate one with
+    ``openssl rand -hex 24``. A key shorter than 16 characters is ignored.
+    Each key is its own user, so chats and uploads made with one are not visible
+    to another.
+    """
+
+    auth_required: bool = True
+    """Set ``SQLAGENT_AUTH_REQUIRED=false`` to serve the API and UI with no sign-in.
+
+    Only for a laptop or a network you already trust. Everyone who can reach the
+    server is then the same user, and can ask questions, upload files and run
+    queries against the configured database.
+    """
+
+    @property
+    def api_key_list(self) -> list[str]:
+        return [k for k in (part.strip() for part in self.api_keys.split(",")) if len(k) >= 16]
+
     neon_auth_base_url: str = Field(
         default="",
         validation_alias=AliasChoices("SQLAGENT_NEON_AUTH_BASE_URL", "NEON_AUTH_BASE_URL"),
