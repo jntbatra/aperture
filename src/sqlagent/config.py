@@ -668,6 +668,10 @@ class Settings(BaseSettings):
     SMTP is blocked (Render's free plan). Without a verified domain, Resend only
     delivers to the account owner's own address, which is enough for the admin."""
 
+    resend_from: str = "Aperture <onboarding@resend.dev>"
+    """Sender for Resend mail. Must be on a domain verified in Resend; the default
+    is Resend's shared test sender. A Gmail address here is rejected with 403."""
+
     postgres_admin_url: str = ""
     """A PostgreSQL URL with permission to CREATE DATABASE.
 

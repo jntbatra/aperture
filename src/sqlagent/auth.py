@@ -190,7 +190,7 @@ def _send_resend(config: Settings, to: str, subject: str, body: str) -> None:
         "https://api.resend.com/emails",
         headers={"Authorization": f"Bearer {config.resend_api_key}"},
         json={
-            "from": config.smtp_from or "Aperture <onboarding@resend.dev>",
+            "from": config.resend_from,
             "to": [to],
             "subject": subject,
             "text": body,
