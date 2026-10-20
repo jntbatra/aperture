@@ -61,35 +61,14 @@ Both tiers default to the same model because it measured fastest *and* most
 accurate — see [07-decisions.md](07-decisions.md#model-selection). The split
 exists for the case where a cheaper model is worth its accuracy loss.
 
-### Multi-tenancy
+### Who can get in
 
-```bash
-SQLAGENT_REQUIRE_AUTH=false             # every request must resolve to a tenant
-SQLAGENT_CONTROL_DATABASE_URL=""        # accounts; empty means <data_dir>/control.db
-SQLAGENT_SECRET_KEY=""                  # Fernet key for tenant credentials
-SQLAGENT_SESSION_COOKIE=aperture_session
-SQLAGENT_SECURE_COOKIES=false           # true behind TLS, which is everywhere but a laptop
-```
-
-`REQUIRE_AUTH` off is the single-tenant deployment: one configured database, no
-accounts, exactly as the API has always behaved. On, there is no
-unauthenticated path at all. `GET /api/health` reports `auth_required` and
-`encryption_configured`, so "is this instance open?" is answerable by a machine
-without reading a container's environment.
-
-`SECRET_KEY` is required when auth is on. Generate one with:
-
-```bash
-.venv/bin/python -c "from sqlagent.saas.secrets import Cipher; print(Cipher.generate_key())"
-```
-
-In production it comes from KMS or Secrets Manager through the task role, never
-from a variable baked into an image. A missing key is a hard failure rather
-than a silent fallback to storing tenant connection strings in clear.
-
-`SECURE_COOKIES` is false locally only because a Secure cookie is silently
-dropped over plain HTTP, and the resulting "sign-in does nothing" is a
-genuinely hard thing to diagnose.
+Multi-tenant accounts, plans and the `SQLAGENT_REQUIRE_AUTH` / `SECRET_KEY`
+settings were removed. Access now has three modes: sign-in with owner approval,
+API keys for programs, or open on a trusted machine. They are set with
+`SQLAGENT_API_KEYS`, `SQLAGENT_AUTH_REQUIRED`, `NEON_AUTH_*`, `DATABASE_URL`,
+`SQLAGENT_ADMIN_EMAIL` and the SMTP settings. See
+[self-hosting](self-hosting.md#who-can-get-in) for what each does and when to use it.
 
 ### Models and transport
 

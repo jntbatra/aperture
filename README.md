@@ -21,6 +21,10 @@ SQL:  SELECT r.name, SUM(o.total) AS total
       The United Kingdom leads with £400.00, followed by Germany at £300.00.
 ```
 
+Self-hosted and MIT licensed: you run the server against your own database and
+model account. There is a web app, a REST API, Python and TypeScript SDKs, an MCP
+server and a CLI. See [Ways to use it](#ways-to-use-it).
+
 ---
 
 ## What makes this different from "just ask ChatGPT for SQL"
@@ -86,9 +90,12 @@ never `cart_items`*. Without it, revenue was reported 100× too large, in the
 wrong currency, and no amount of prompting fixes that — the information is
 simply absent from the schema.
 
-**Bring your own data.** Upload a CSV, an Excel workbook or a PostgreSQL dump
-and ask questions about it immediately. Every question is searchable, alongside
-the SQL it produced and the conversation it came from.
+**Bring your own data.** Upload a CSV, an Excel workbook or a plain-SQL
+PostgreSQL dump and ask questions about it immediately. A dump is converted to
+SQLite with its tables, rows and keys, so no Postgres server is needed. Every
+question is searchable, alongside the SQL it produced and the conversation it
+came from, and each answer's SQL has a Run button that re-runs it read-only.
+Chats and uploads belong to the person who made them.
 
 **You choose how hard it tries, per question.** A tuning panel on the homepage
 exposes the quality toggles — review the query with a second model, write it
@@ -102,14 +109,16 @@ Measured on a real database: 3 model calls by default, 6 on `thorough`.
 **Other assistants can use it.** An MCP server offers three tools —
 `ask_database`, `list_tables`, `describe_table` — so another agent can ask this
 one questions without ever holding database credentials. There is deliberately
-no tool that accepts raw SQL.
+no tool that accepts raw SQL. Over HTTP it requires an API key.
 
 ---
 
 ## Quick start
 
 You need Python 3.12+, Docker (for the test database), Node 20+ (for the web
-interface), and AWS credentials with Bedrock access.
+interface), and access to a model: AWS credentials with Bedrock access, or a
+Bedrock API key (`SQLAGENT_LLM_AUTH=bearer`, see
+[self-hosting](docs/self-hosting.md)).
 
 ```bash
 # 1. Install
@@ -182,6 +191,11 @@ top and work down.
 | 6 | [Running it](docs/06-operations.md) | Configuration, deployment, benchmarking, troubleshooting |
 | 7 | [Decisions and measurements](docs/07-decisions.md) | Every significant choice, what it cost, what it bought |
 | 8 | [Where the accuracy goes](docs/08-intent-design.md) | What `fast` really is, what the measurements rule out, and the one change the evidence points at |
+| — | [Run your own server](docs/self-hosting.md) | Laptop, Docker and server setups; the three access modes; limits and costs |
+| — | [REST API](docs/api.md) | Every route, API-key auth, curl examples |
+| — | [MCP server](docs/mcp.md) | Tools, stdio for Claude Desktop, HTTP with a key |
+| — | [SDKs](sdk/README.md) | Python and TypeScript clients, and [how they are released](sdk/RELEASING.md) |
+| — | [Deploying on Render + Neon](deploy/RENDER.md) | The setup this project itself runs |
 | — | [Aperture as a service](SAAS.md) | The hosted-product plan. Accounts and plans were removed (2026-10-04); sign-in with owner approval and API keys came back later, see [self-hosting](docs/self-hosting.md) |
 | — | [Tickets](TICKETS.md) | Every decision as a ticket with its real status: done, open, or won't-build with the reason |
 
@@ -197,7 +211,7 @@ sql-agent/
 │   │   ├── graph.py         Tables as nodes, foreign keys as edges
 │   │   └── retrieval.py     Bounded breadth-first walk to pick relevant tables
 │   ├── llm/
-│   │   └── mantle.py        Amazon Bedrock Mantle client, SigV4-signed
+│   │   └── mantle.py        Amazon Bedrock Mantle client: SigV4, Bedrock token or bearer
 │   ├── guards/
 │   │   ├── validator.py     Prove a statement is a safe, read-only SELECT
 │   │   ├── cost.py          Ask the planner what a query costs, before running it
@@ -211,15 +225,18 @@ sql-agent/
 │   │   ├── sample.py        A couple of example rows, to show real value formats
 │   │   └── profile.py       Per-column value profiles (opt-in; measured, see docs/07)
 │   ├── api/
-│   │   └── app.py           FastAPI: JSON and Server-Sent Events
+│   │   ├── app.py           FastAPI: JSON and Server-Sent Events, serves the built web app
+│   │   └── auth_routes.py   Sign-in session, owner approval page, API-key gate
+│   ├── auth.py              Neon Auth token check, approvals, sessions
+│   ├── objectstore.py       Uploaded originals in S3-compatible storage (Neon)
 │   ├── ingest.py            CSV / Excel / pg-dump upload → queryable database
-│   ├── store.py             History, conversations and dataset registry (SQLite)
+│   ├── pgdump.py            Plain-SQL pg_dump → SQLite, no server needed
+│   ├── store.py             Chats and history per user (Neon Postgres or SQLite); dataset registry
 │   ├── conversation.py      Turns carried into the prompt so follow-ups resolve
 │   ├── summarise.py         Fold turns past the window into a standing note
 │   ├── judge.py             Grade a finished answer, offline — is it the answer asked for
 │   ├── drift.py             Did recent questions go differently from earlier ones
 │   ├── glossary.py          Units, terms and metrics the schema cannot express
-│   ├── cache.py             Question → SQL. The statement, never the rows
 │   ├── voting.py            Sample N times, keep the query that recurs (opt-in)
 │   ├── clarify.py           Ask, when a question has two defensible answers (opt-in)
 │   ├── report.py            Split a multi-part question, answer each (opt-in)
@@ -232,13 +249,19 @@ sql-agent/
 │   └── cli.py               Terminal interface
 ├── frontend/            React + TypeScript web interface
 │                        (schema graph drawn with React Flow)
+├── sdk/
+│   ├── python/              aperture-sql for Python
+│   └── typescript/          aperture-sql for TypeScript / JavaScript
+├── deploy/                  Render + Neon deployment guide
+├── Dockerfile, render.yaml  One container: API and built web app
+├── neon.ts                  Neon services: auth, object storage, functions
 ├── benchmarks/
 │   ├── bird.py              BIRD mini-dev harness (--judge grades the prose too)
 │   ├── ambiguity.py         How often does the ambiguity check agree with itself
 │   └── ambiguity_questions.json  30 labelled questions, 15 vague / 15 clear
 ├── glossaries/
 │   └── example.json         Declared units and terms for one real database
-├── tests/               487 tests
+├── tests/               828 tests (757 run without a database)
 └── docs/                The documentation table above
 ```
 
@@ -302,6 +325,12 @@ something wrong or dangerous, because it will.
 | Row cap | Unbounded result sets exhausting memory | Injected `LIMIT` + a bounded fetch |
 | Statement timeout | Queries that scan too much | The database |
 | Read-only transaction | Any write that got past everything above | The database |
+| Sign-in with owner approval, or API keys | Strangers using the server and spending the model bill | `auth.py`, `api/auth_routes.py` |
+| Per-user ownership | One person reading another's chats or uploads (a stranger's id returns 404) | `store.py`, checked on every route |
+| Same gates on re-run | The Run button being a way around the validator | `POST /api/query` runs the validator, cost check, row cap and timeout |
+
+With `SQLAGENT_AUTH_REQUIRED=false` the access rows do not apply: anyone who can
+reach the server can use it. That is for a laptop or a trusted network.
 
 Sample rows are real customer data and travel to the model provider. They can
 be restricted per column or switched off entirely — see
