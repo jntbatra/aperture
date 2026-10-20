@@ -158,8 +158,8 @@ account ([run your own](docs/self-hosting.md)). Then there are these ways in.
 |---|---|---|
 | **Web app** | Chat, history, uploads, schema graph. Sign-in with owner approval, or open on a trusted machine. | [self-hosting](docs/self-hosting.md) |
 | **REST API** | The routes the web app uses, with API-key auth. | [docs/api.md](docs/api.md) |
-| **Python SDK** | `pip install aperture-sql` | [sdk/python](sdk/python/README.md) |
-| **TypeScript SDK** | `npm install aperture-sql` | [sdk/typescript](sdk/typescript/README.md) |
+| **Python SDK** | `pip install aperture-sql` (not on PyPI yet; [install from GitHub](sdk/python/README.md#install)) | [sdk/python](sdk/python/README.md) |
+| **TypeScript SDK** | `npm install aperture-sql` (not on npm yet; [build from source](sdk/typescript/README.md#install)) | [sdk/typescript](sdk/typescript/README.md) |
 | **MCP server** | Lets Claude Desktop or any MCP client ask your database. | [docs/mcp.md](docs/mcp.md) |
 | **CLI** | `python -m sqlagent.cli "How many customers?"` | below |
 

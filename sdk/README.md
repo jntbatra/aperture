@@ -3,7 +3,11 @@
 Ask a database a question in English from your own code and get back the answer,
 the SQL that produced it, and the rows.
 
-| Language | Install | Docs |
+**Not published yet.** `aperture-sql` is not on PyPI or npm today, so the `pip` and
+`npm` commands below will fail until it is. Each package's README says how to install it
+from this repository meanwhile.
+
+| Language | Install (once published) | Docs |
 |---|---|---|
 | Python 3.9+ | `pip install aperture-sql` | [python/README.md](python/README.md) |
 | TypeScript / JavaScript (Node 18+) | `npm install aperture-sql` | [typescript/README.md](typescript/README.md) |

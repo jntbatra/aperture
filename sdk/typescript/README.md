@@ -8,9 +8,18 @@ with `fetch`).
 You need an Aperture server to talk to. Aperture is self-hosted: see
 [Run your own server](https://github.com/jntbatra/aperture/blob/master/docs/self-hosting.md).
 
+## Install
+
+**Not on npm yet**, so `npm install aperture-sql` does not work today. Build it from
+this repository:
+
 ```bash
-npm install aperture-sql
+git clone https://github.com/jntbatra/aperture
+cd aperture/sdk/typescript && npm ci && npm run build
+npm install /path/to/aperture/sdk/typescript   # from your own project
 ```
+
+Once it is published, `npm install aperture-sql` will work.
 
 ## Use it
 

@@ -7,9 +7,16 @@ it, and the rows.
 You need an Aperture server to talk to. Aperture is self-hosted: see
 [Run your own server](https://github.com/jntbatra/aperture/blob/master/docs/self-hosting.md).
 
+## Install
+
+**Not on PyPI yet**, so `pip install aperture-sql` does not work today. Install it from
+GitHub:
+
 ```bash
-pip install aperture-sql
+pip install "git+https://github.com/jntbatra/aperture#subdirectory=sdk/python"
 ```
+
+Once it is published, `pip install aperture-sql` will work.
 
 ## Use it
 

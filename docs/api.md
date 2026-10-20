@@ -77,6 +77,6 @@ to your chat history.
 
 ## Clients
 
-[Python](../sdk/python/README.md) (`pip install aperture-sql`) and
-[TypeScript](../sdk/typescript/README.md) (`npm install aperture-sql`) wrap these
+[Python](../sdk/python/README.md) (not on PyPI yet) and
+[TypeScript](../sdk/typescript/README.md) (not on npm yet) wrap these
 routes.
