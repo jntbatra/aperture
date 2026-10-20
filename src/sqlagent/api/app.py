@@ -609,7 +609,11 @@ def resolve_agent(dataset_id: str | None, user_id: str | None = None) -> SqlAgen
         # Someone else's dataset is "not found", not "forbidden": its id is not
         # something to confirm exists.
         if get_store().get_dataset(dataset_id, user_id=user_id) is None:
-            raise HTTPException(status_code=404, detail=f"No dataset '{dataset_id}'")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No dataset '{dataset_id}'. Uploads are cleared when the "
+                "server restarts; upload the file again.",
+            )
         return get_dataset_agent(dataset_id)
     try:
         return get_agent()

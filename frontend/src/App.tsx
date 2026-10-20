@@ -23,6 +23,7 @@ import './App.css';
 import {
   askStreaming,
   getConversation,
+  ApiError,
   getHealth,
   getSchema,
   getSuggestions,
@@ -202,7 +203,18 @@ export default function App({
   // Refetched when the dataset changes: health, schema and suggestions all
   // describe whichever database the next question will run against.
   useEffect(() => {
-    getHealth(datasetId).then(setHealth).catch(() => setHealth(null));
+    getHealth(datasetId)
+      .then(setHealth)
+      .catch((exc) => {
+        // A chat can point at an upload the server no longer has (uploads do
+        // not survive a restart on the free plan). That is not "offline":
+        // drop the stale dataset and the effect runs again for the default.
+        if (datasetId && exc instanceof ApiError && exc.status === 404) {
+          setDatasetId(null);
+        } else {
+          setHealth(null);
+        }
+      });
     getSchema(datasetId).then(setSchema).catch(() => setSchema(null));
     // null keeps the schema-derived fallback in play until this resolves.
     getSuggestions(datasetId)
