@@ -63,10 +63,12 @@ interface PanelProps {
   title: string;
   defaultOpen?: boolean;
   action?: ReactNode;
+  /** Always visible in the header, open or closed, at the right edge. */
+  trailing?: ReactNode;
   children: ReactNode;
 }
 
-export function Panel({ title, defaultOpen = false, action, children }: PanelProps) {
+export function Panel({ title, defaultOpen = false, action, trailing, children }: PanelProps) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
@@ -85,13 +87,23 @@ export function Panel({ title, defaultOpen = false, action, children }: PanelPro
           {title}
         </button>
         {open && action ? action : null}
+        {trailing}
       </div>
       {open && <div className="panel__body">{children}</div>}
     </section>
   );
 }
 
-export function SqlPanel({ sql }: { sql: string }) {
+export function SqlPanel({
+  sql,
+  onRun,
+  running = false,
+}: {
+  sql: string;
+  /** When given, a Run pill sits in the header, visible even while collapsed. */
+  onRun?: () => void;
+  running?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -107,6 +119,18 @@ export function SqlPanel({ sql }: { sql: string }) {
   return (
     <Panel
       title="SQL"
+      trailing={
+        onRun && (
+          <button
+            className="copy copy--pill"
+            onClick={onRun}
+            disabled={running}
+            title="Run this query again (read-only)"
+          >
+            {running ? 'Running…' : 'Run'}
+          </button>
+        )
+      }
       action={
         <button className="copy" onClick={copy}>
           {copied ? 'Copied' : 'Copy'}

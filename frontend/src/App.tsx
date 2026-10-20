@@ -25,6 +25,7 @@ import {
   getConversation,
   ApiError,
   getHealth,
+  listDatasets,
   getSchema,
   getSuggestions,
   type AskOptions,
@@ -47,6 +48,7 @@ import { Transcript, type Exchange } from './components/Transcript';
  *  shares or bookmarks, and putting an id in the address bar invites sharing a
  *  link that will not work for anyone else. */
 const THREAD_KEY = 'aperture.thread';
+const DATASET_KEY = 'aperture.dataset';
 
 /**
  * Suggest questions that fit the database actually connected.
@@ -193,7 +195,26 @@ export default function App({
 
   // null means the database this server was started with; a string selects an
   // uploaded dataset.
-  const [datasetId, setDatasetId] = useState<string | null>(null);
+  // Remembered across refreshes, so a reload keeps working on the database you
+  // picked. Checked against the server on load: uploads can disappear.
+  const [datasetId, setDatasetId] = useState<string | null>(
+    () => localStorage.getItem(DATASET_KEY) || null,
+  );
+
+  useEffect(() => {
+    if (datasetId) localStorage.setItem(DATASET_KEY, datasetId);
+    else localStorage.removeItem(DATASET_KEY);
+  }, [datasetId]);
+
+  // When the selected upload is gone, use the newest one that exists rather
+  // than a dead id or silently nothing.
+  const useExistingDataset = useCallback(() => {
+    listDatasets()
+      .then((all) => setDatasetId((current) =>
+        current && all.some((d) => d.id === current) ? current : (all[0]?.id ?? null),
+      ))
+      .catch(() => setDatasetId(null));
+  }, []);
 
   // Holds the cancel function for an in-flight request, so a new question can
   // abandon the previous one rather than racing it.
@@ -206,11 +227,10 @@ export default function App({
     getHealth(datasetId)
       .then(setHealth)
       .catch((exc) => {
-        // A chat can point at an upload the server no longer has (uploads do
-        // not survive a restart on the free plan). That is not "offline":
-        // drop the stale dataset and the effect runs again for the default.
+        // The selected upload is gone (uploads do not survive a restart on the
+        // free plan). That is not "offline": switch to one that exists.
         if (datasetId && exc instanceof ApiError && exc.status === 404) {
-          setDatasetId(null);
+          useExistingDataset();
         } else {
           setHealth(null);
         }
@@ -220,7 +240,7 @@ export default function App({
     getSuggestions(datasetId)
       .then((payload) => setSuggested(payload.questions))
       .catch(() => setSuggested([]));
-  }, [datasetId]);
+  }, [datasetId, useExistingDataset]);
 
   // Restore the thread that was open when the page was last closed. A
   // conversation that evaporates on refresh is not a conversation.
@@ -231,7 +251,6 @@ export default function App({
     getConversation(saved)
       .then((detail) => {
         setThreadId(detail.conversation.id);
-        setDatasetId(detail.conversation.dataset_id ?? null);
         setExchanges(toExchanges(detail.entries));
       })
       .catch(() => {
@@ -315,7 +334,6 @@ export default function App({
 
     const detail = await getConversation(id);
     setThreadId(detail.conversation.id);
-    setDatasetId(detail.conversation.dataset_id ?? null);
     localStorage.setItem(THREAD_KEY, detail.conversation.id);
     setExchanges(toExchanges(detail.entries));
   }, []);

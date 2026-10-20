@@ -264,17 +264,11 @@ function ExchangeView({
             )}
 
             {result.sql && (
-              <div className="sqlrow">
-                <SqlPanel sql={result.sql} />
-                <button
-                  className="ghost-button sqlrow__run"
-                  onClick={() => run(result.sql as string)}
-                  disabled={running}
-                  title="Run this query again (read-only)"
-                >
-                  {running ? 'Running…' : 'Run'}
-                </button>
-              </div>
+              <SqlPanel
+                sql={result.sql}
+                onRun={() => run(result.sql as string)}
+                running={running}
+              />
             )}
 
             {runError && <div className="notice notice--error">{runError}</div>}
