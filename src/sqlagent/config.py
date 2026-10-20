@@ -663,6 +663,11 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     """Outgoing mail for approval requests. Amazon SES SMTP works unchanged."""
 
+    resend_api_key: str = ""
+    """Send mail through Resend's HTTPS API instead of SMTP. Use this where outbound
+    SMTP is blocked (Render's free plan). Without a verified domain, Resend only
+    delivers to the account owner's own address, which is enough for the admin."""
+
     postgres_admin_url: str = ""
     """A PostgreSQL URL with permission to CREATE DATABASE.
 

@@ -35,6 +35,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import httpx
 import jwt
 from sqlalchemy import (
     Column,
@@ -158,27 +159,58 @@ class TokenVerifier:
 
 
 def send_mail(config: Settings, to: str, subject: str, body: str) -> None:
-    """Send one message, or log it when no SMTP server is configured.
+    """Queue one message and return at once, or log it when no mail is configured.
 
-    Never raises: a mail outage must not turn a sign-in into a 500. The body is
-    logged on failure so the administrator can still act on an approval link.
+    Delivery runs on a background thread: a slow or blocked mail server must not
+    hold up the sign-in request. Never raises, and the body is logged on failure
+    so the administrator can still act on an approval link.
     """
-    if not config.smtp_host or not to:
-        logger.warning("mail not sent (no SMTP configured) to=%s subject=%s\n%s", to, subject, body)
+    if not to or not (config.resend_api_key or config.smtp_host):
+        logger.warning("mail not sent (no mail configured) to=%s subject=%s\n%s", to, subject, body)
         return
+    threading.Thread(
+        target=_deliver, args=(config, to, subject, body), name="send-mail", daemon=True
+    ).start()
+
+
+def _deliver(config: Settings, to: str, subject: str, body: str) -> None:
+    try:
+        if config.resend_api_key:
+            _send_resend(config, to, subject, body)
+        else:
+            _send_smtp(config, to, subject, body)
+        logger.info("mail sent to %s: %s", to, subject)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not send mail to %s; body follows\n%s", to, body)
+
+
+def _send_resend(config: Settings, to: str, subject: str, body: str) -> None:
+    """Send over HTTPS. Hosts such as Render's free plan block outbound SMTP."""
+    reply = httpx.post(
+        "https://api.resend.com/emails",
+        headers={"Authorization": f"Bearer {config.resend_api_key}"},
+        json={
+            "from": config.smtp_from or "Aperture <onboarding@resend.dev>",
+            "to": [to],
+            "subject": subject,
+            "text": body,
+        },
+        timeout=15,
+    )
+    reply.raise_for_status()
+
+
+def _send_smtp(config: Settings, to: str, subject: str, body: str) -> None:
     message = EmailMessage()
     message["From"] = config.smtp_from or config.smtp_user
     message["To"] = to
     message["Subject"] = subject
     message.set_content(body)
-    try:
-        with smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=15) as smtp:
-            smtp.starttls()
-            if config.smtp_user:
-                smtp.login(config.smtp_user, config.smtp_password)
-            smtp.send_message(message)
-    except Exception:  # noqa: BLE001
-        logger.exception("could not send mail to %s; body follows\n%s", to, body)
+    with smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=15) as smtp:
+        smtp.starttls()
+        if config.smtp_user:
+            smtp.login(config.smtp_user, config.smtp_password)
+        smtp.send_message(message)
 
 
 # --------------------------------------------------------------------------
