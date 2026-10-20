@@ -157,7 +157,13 @@ const FOLLOW_UPS = [
   'Why might that be?',
 ];
 
-export default function App() {
+export default function App({
+  onSignOut,
+  email,
+}: {
+  onSignOut?: () => void;
+  email?: string;
+}) {
   const [question, setQuestion] = useState('');
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [events, setEvents] = useState<ProgressEvent[]>([]);
@@ -368,6 +374,15 @@ export default function App() {
           >
             Explore
           </button>
+          {onSignOut && (
+            <button
+              className="ghost-button"
+              onClick={onSignOut}
+              title={email ? `Signed in as ${email}` : undefined}
+            >
+              Sign out
+            </button>
+          )}
         </div>
       </header>
 

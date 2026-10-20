@@ -23,29 +23,12 @@ export function Shell() {
 
   return (
     <>
-      <App />
-      <button
-        onClick={() =>
+      <App
+        onSignOut={() =>
           Promise.allSettled([logout(), authClient.signOut()]).then(() => setMe(null))
         }
-        title={`Signed in as ${me.email}`}
-        style={{
-          position: 'fixed',
-          top: '0.5rem',
-          right: '0.75rem',
-          zIndex: 50,
-          background: 'var(--card)',
-          color: 'var(--muted-foreground)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-md)',
-          padding: '0.25rem 0.6rem',
-          font: 'inherit',
-          fontSize: '0.8rem',
-          cursor: 'pointer',
-        }}
-      >
-        Sign out
-      </button>
+        email={me.email}
+      />
     </>
   );
 }
